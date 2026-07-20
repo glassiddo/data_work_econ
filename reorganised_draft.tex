@@ -1,0 +1,178 @@
+\section{Introduction}
+
+this wouldnt speak much about measurement issues in datasets
+
+\section{empirical}
+log() of low numbers is pretty useless. not unknown, but worth paying attention to
+
+\subsection{shift share}
+
+\section{Country level analysis}
+
+\subsubsection{Country names}
+Certainly recommend to use country codes (iso2/3) rather than country names, for consistency between datasets. however, even those may have certain levels of inconsistency or potential issues. e.g., south sudan may be SSD or SDS. 
+
+\subsubsection{Country's consistency over time}
+
+pay special attention to countries that changed their borders over time, or have received independence. sudan vs south sudan. depending on the year, montenegro might be part of yugoslavia, serbia and montenegro, or montenegro - but the same is true for kosovo (despite not being mentioned in the name of 'serbia and montenegro'), but in kosovo's case it also might not exist in certain datasets. taiwan might be referred to in different ways depending on the dataset.
+
+\subsubsection{country aggregates}
+in one of the projects i was working on there were certain countries in our sample, and all of the other countries were aggregated as 'rest of the world'. now, if want to aggregate the rest of the world's values of some variable (e.g., sum its gdp) - on paper we could use something like:
+\begin{verbatim}
+    df |> 
+        filter_out(country %in% sample_countries) |>
+        summarise(gdp = sum(gdp)) |> 
+        mutate(country == "Rest of the world")
+\end{verbatim}
+however, in some datasets there may be aggregates (e.g., "Middle East"). In some datasets there may be columns that refer to those which can help excluding them (e.g., for WDI, use region != "Aggregates"), but not always. and the names of the 'aggregate' countries might be different across different datasets (e.g., in two different datasets of FAOSTAT, there is in one dataset (https://www.fao.org/faostat/en/#data/FBSH) an aggregated region of 'Low Income Food Deficit Countries'.
+but in another (https://www.fao.org/faostat/en/#data/QCL) this appears as 'Low Income Food Deficit Countries (LIFDCs)'. So in this case, just having the following would not work across both datasets 
+\begin{verbatim}
+    df |> filter_out(country == "Low Income Food Deficit Countries") 
+\end{verbatim}
+
+\section{Spatial Analysis}
+
+- sf is great
+- gpkg is recommended over shapefile 
+- gee is great, but for some stuff r does the job done - gee is in my opinion mainly advantageous if the data is already there, if certain operations (geometric operations for example) are required, or heavier processes (although with the new limits, less so). 
+
+\subsubsection{polygons vs points}
+sometimes we may want to work with single points in a given unit, rather than the full polygon. that's especially the case if 1) the analysis is very heavy (e.g., calculating road path from unit x to y); 2) we are interested in the role of specific areas within the unit (e.g., the main city), 3) fill
+if we chooes to use points, how do we select the point? it depends obviously on what we want to achieve.
+centroid is a popular solution, but it suffers from various drawbacks. 
+- it is not necessarily inside the unit. think of units with weird shapes (vietnam), that are composed of many distinct geometries (multiple-island countries, like the philippines) or with holes inside (south africa). if we're calculating the distance of centroid of country x to that of y, and country y's centroid is inside that of x's, it's not ideal...
+- one solution for that would be to use \text{st_point_on_surface} from the sf package. it guarantees that the point would be on the surface of the unit, and generally is around its middle. however, for certain cases, it might still not capture something we're interested in\footnote{I was working with an admin unit that included a city in the mainland, and an island very far from the mainland. The island was larger, so \text{st_point_on_surface} has led to a point in the island. In some cases perhaps it's fine, but if we're interested in anything that involves population - then it really does not capture what we want}
+- what about population-weighted centroid? we can use data like GHS-POP to do it (recommended to do it in GEE). However, 1) it might still be outside of the unit, 2) say that there are several population centres in different areas. the pop-weighted centroid is probably going to be between them, which might be good but it'll likely reflect a (relatively) remote point. which might be fine but not always!
+- similarly to the last suggestion, can use 'the most populated point'. for certain things it might be preferable (for others, not as much). one thing to consider here, as many spatial analysis, is the resolution. the most populated 100m place in a country could theoretically be a small town that has an extremely dense point. so aggregating by 1/5/10km might be preferable, but examine the outputs and see whether this captures what you're interested in
+
+\subsubsection{finding a 'representitive' category}
+there are various spatial datasets that might involve finding some balance between various categories. mines datasets, for example, sometimes have each individual mine as a row, or would have a value of 'suitability for a given commodity' per cell. depends on what we want to have, we might want to aggregate the data per unit. should we sum the number of distinct mines? use the commodity with the highest value of suitability? no obvious answer here but worth thinking about those...
+
+\section{NAs}
+say that we have a data with NA observations:
+\begin{verbatim}
+    > df
+# A tibble: 3 Ã— 1
+      x
+  <dbl>
+1     1
+2     2
+3    NA
+
+na.rm = T implies that the NA is 0, such that sum(df$x, na.rm = T) = 3
+na.rm = F would  imply that sum should be NA
+
+\end{verbatim}
+so far not a problem.
+however, especially if we use a loop or across to aggregate over several variables or units. assume we have this dataset
+\begin{verbatim}
+ df <- tibble(
+  x = c(1, 2, NA),
+  y = c(NA, NA, NA),
+  z = c(1, 2, 3)
+  )
+\end{verbatim}
+and we want to sum over all. 
+\begin{verbatim}
+
+df |> 
+  summarise(
+    across(everything(), \(col) sum(col, na.rm = F))
+  )
+      x     y     z
+  <dbl> <int> <dbl>
+1     3     0     6
+
+# so the NAs are always 0
+
+df |> 
+  summarise(
+    across(everything(), \(col) sum(col, na.rm = F))
+  )
+      x     y     z
+  <dbl> <int> <dbl>
+1   NA    NA     6
+
+# so the row that has values is always NA
+
+\end{verbatim}
+
+but perhaps we are interested in preserving the NAs only in cases where all rows are NA. then, we'd need to modify the function
+
+\begin{verbatim}
+df |> 
+  summarise(across(everything(), \(col) if (all(is.na(col))) NA_real_ else sum(col, na.rm = TRUE)))
+
+     x     y     z
+  <dbl> <dbl> <dbl>
+1     3    NA     6
+\end{verbatim}
+
+\section{R}
+
+- I mainly used dplyr, so while data.table is faster, i find the syntax of it a bit less intuitive and prefer to work with the more piped structure of dplyr
+- for faster processes while still using dplyr syntax, dtplyr is very useful. duckdb is way faster and presents another option that is useful for some cases
+- highly recommend to examine updates to the dplyr package (and in general, to packages that are used often). they sometimes include cleaner syntax (example - switching from groupby(x) summarise(y = mean(z)) ungroup() into summarise(y = mean(z), .by = x)
+- the new pipe (|>) is nicer and cleaner than the old magrittr '\%>\%' pipe
+- there are some functions with identical names across packages. this is a source of some bugs and odd behaviour that is generally hard to understand or detect. 'lag' is a nice example of that. its base version from stats::lag is quite bad as it doesn't actually lag the variables; dplyr::lag (or data.table::shift(type = "lag") are much more reliable. raster::select might cause the code to break if dplyr::select is not mentioned explicitly (but here at least there wouldn't be a mysterious bug, unlike the 'lag' case). another example is 'copy\_labels', that exists in both 'sjalebelled' and 'labelled'. I once didn't examine the exact meaning of the packages, and incorrectly assumed that they would just copy the labels per variables while not changing the data.
+But note that they do change the values and fill in values for the data with NA, but in an opposite direction depending on the order of the data, as the functions work in this way
+\begin{verbatim}
+    sjlabelled::copy_labels(new, old)
+    labelled::copy_labels(old, new)
+    # to get them to be 'equivalent', one can e.g., use
+    labelled::copy_labels_from()
+    or set the exact parameters like labelled::copy_labels(to=new, from=old) 
+\end{verbatim}
+example:
+\begin{verbatim}
+    library(dplyr)
+library(labelled)
+library(sjlabelled)
+
+df1 <- tibble(
+  a = 1,
+  b = 2
+) 
+
+df2 <- tibble(
+  a = 1,
+  b = NA_real_
+)
+
+> labelled::copy_labels(df1, df2)
+# A tibble: 1 Ã— 2
+      a     b
+  <dbl> <dbl>
+1     1    NA
+> sjlabelled::copy_labels(df1, df2)
+# A tibble: 1 Ã— 2
+      a     b
+  <dbl> <dbl>
+1     1     2
+> 
+> labelled::copy_labels(df1, df2)
+# A tibble: 1 Ã— 2
+      a     b
+  <dbl> <dbl>
+1     1    NA
+> sjlabelled::copy_labels(df1, df2)
+# A tibble: 1 Ã— 2
+      a     b
+  <dbl> <dbl>
+1     1     2
+
+\end{verbatim}
+
+\section{Ploting}
+There are much better guides than whatever I'll write, but some important things - 
+a) axis titles are almost always unnecessary, unreadable, ugly and distracting. 
+
+\section{Specific datasets}
+
+\subsection{WDPA (protected areas)}
+
+\subsection{IPUMS}
+
+\bibliography{ref}
+
+\end{document}
