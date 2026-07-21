@@ -4,39 +4,272 @@ output:
   html_document:
     toc: true
     toc_depth: 3
+    css: styles.css
 ---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+
+pacman::p_load(dplyr, labelled, sjlabelled, tidyr, ggplot2, scales, sf)
+
+# country_panel <- WDI::WDI(
+#   country = c("US", "CN", "EUU"),
+#   indicator = "NY.GDP.MKTP.CD",
+#   start = 2019,
+#   end = 2024
+# ) |>
+#   transmute(
+#     iso2 = iso2c,
+#     country_name = country,
+#     year,
+#     gdp_trillion = round(NY.GDP.MKTP.CD / 1e12, 1)
+#   ) |>
+#   arrange(iso2, year)
+# saveRDS(country_panel, "data/wdi_gdp_country_panel.rds")
+
+country_panel <- readRDS("data/wdi_gdp_country_panel.rds")
+
+country_panel_with_na <- country_panel |>
+  mutate(
+    gdp_trillion = if_else(
+      (iso2 == "EU" & year == 2021) | (iso2 == "CN" & year == 2022),
+      NA_real_,
+      gdp_trillion
+    ),
+    investment_trillion = if_else(
+      iso2 == "EU",
+      NA_real_,
+      round(gdp_trillion * 0.22, 1)
+    )
+  )
+
+country_df <- country_panel |>
+  filter(year == 2024) |>
+  select(iso2, country_name, gdp_trillion)
+
+na_df <- country_panel_with_na |>
+  filter(year %in% 2021:2023) |>
+  select(year, iso2, gdp_trillion, investment_trillion) |>
+  pivot_wider(
+    names_from = iso2,
+    values_from = c(gdp_trillion, investment_trillion),
+    names_glue = "{.value}_{iso2}"
+  ) |>
+  select(gdp_trillion_US, gdp_trillion_CN, investment_trillion_EU)
+
+labels_df1 <- country_df |>
+  select(iso2, gdp_trillion)
+
+labels_df2 <- country_df |>
+  mutate(gdp_trillion = if_else(iso2 == "EU", NA_real_, gdp_trillion)) |>
+  select(iso2, gdp_trillion)
+```
 
 # Introduction
 
 this wouldnt speak much about measurement issues in datasets
 
-# empirical
-log() of low numbers is pretty useless. not unknown, but worth paying attention to
-
-## shift share
-
 # Country level analysis
 
 ### Country names
 Certainly recommend to use country codes (iso2/3) rather than country names, for consistency between datasets. however, even those may have certain levels of inconsistency or potential issues. e.g., south sudan may be SSD or SDS. 
+```{r eval=FALSE}
+# country_panel <- WDI::WDI(
+#   country = c("US", "CN", "EUU"),
+#   indicator = "NY.GDP.MKTP.CD",
+#   start = 2019,
+#   end = 2024
+# ) |>
+#   transmute(
+#     iso2 = iso2c,
+#     country_name = country,
+#     year,
+#     gdp_trillion = round(NY.GDP.MKTP.CD / 1e12, 1)
+#   ) |>
+#   arrange(iso2, year)
+# saveRDS(country_panel, "data/wdi_gdp_country_panel.rds")
+
+country_panel <- readRDS("data/wdi_gdp_country_panel.rds")
+```
+WDI uses `EUU` to request the European Union, although the returned iso2 code is `EU`.
+
+```{r}
+country_df
+```
+
+```{r}
+country_panel
+```
 
 ### Country's consistency over time
 
 pay special attention to countries that changed their borders over time, or have received independence. sudan vs south sudan. depending on the year, montenegro might be part of yugoslavia, serbia and montenegro, or montenegro - but the same is true for kosovo (despite not being mentioned in the name of 'serbia and montenegro'), but in kosovo's case it also might not exist in certain datasets. taiwan might be referred to in different ways depending on the dataset.
 
 ### country aggregates
-in one of the projects i was working on there were certain countries in our sample, and all of the other countries were aggregated as 'rest of the world'. now, if want to aggregate the rest of the world's values of some variable (e.g., sum its gdp) - on paper we could use something like:
-```r
-    df |> 
-        filter_out(country %in% sample_countries) |>
-        summarise(gdp = sum(gdp)) |> 
-        mutate(country == "Rest of the world")
+in one of the projects i was working on there were certain countries in our sample, and all of the other countries were aggregated as 'rest of the world'. now, if want to aggregate the rest of the world's values of some variable (e.g., sum its gdp) - on paper we could use something like US vs the rest:
+```{r}
+country_panel |> 
+  mutate(iso2 = if_else(iso2 == "US", "US", "ROW")) |>
+  summarise(gdp_trillion = sum(gdp_trillion), .by = c(iso2, year)) |>
+  arrange(iso2, year)
 ```
 however, in some datasets there may be aggregates (e.g., "Middle East"). In some datasets there may be columns that refer to those which can help excluding them (e.g., for WDI, use region != "Aggregates"), but not always. and the names of the 'aggregate' countries might be different across different datasets (e.g., in two different datasets of FAOSTAT, there is in one dataset (https://www.fao.org/faostat/en/#data/FBSH) an aggregated region of 'Low Income Food Deficit Countries'.
-but in another (https://www.fao.org/faostat/en/#data/QCL) this appears as 'Low Income Food Deficit Countries (LIFDCs)'. So in this case, just having the following would not work across both datasets 
-```r
-    df |> filter_out(country == "Low Income Food Deficit Countries") 
+but in another (https://www.fao.org/faostat/en/#data/QCL) this appears as 'Low Income Food Deficit Countries (LIFDCs)'. So in this case, filtering only one exact name would not work across both datasets 
+
+# NAs
+say that we have a data with NA observations:
+```{r}
+na_df |> 
+  select(gdp_trillion_CN)
 ```
+na.rm = T implies that the NA is 0, such that sum(na_df$gdp_trillion_CN, na.rm = T) would still return a value
+na.rm = F would  imply that sum should be NA
+
+so far not a problem.
+however, especially if we use a loop or across to aggregate over several variables or units. assume we have this dataset
+```{r}
+na_df
+```
+and we want to sum over all. 
+```{r}
+na_df |> 
+  summarise(
+    across(everything(), \(col) sum(col, na.rm = TRUE))
+  )
+```
+
+# so the NAs are always 0
+
+```{r}
+na_df |> 
+  summarise(
+    across(everything(), \(col) sum(col, na.rm = FALSE))
+  )
+```
+
+# so the column that has values and NAs is always NA
+
+but perhaps we are interested in preserving the NAs only in cases where all rows are NA. then, we'd need to modify the function
+
+```{r}
+na_df |> 
+  summarise(across(everything(), \(col) if (all(is.na(col))) NA_real_ else sum(col, na.rm = TRUE)))
+```
+
+# R
+
+## style and speed
+
+- I mainly used dplyr, so while data.table is faster, i find the syntax of it a bit less intuitive and prefer to work with the more piped structure of dplyr
+- for faster processes while still using dplyr syntax, dtplyr is very useful. duckdb is way faster and presents another option that is useful for some cases
+- highly recommend to examine updates to the dplyr package (and in general, to packages that are used often). they sometimes include cleaner syntax (example - switching from groupby(x) summarise(y = mean(z)) ungroup() into summarise(y = mean(z), .by = x)
+- the new pipe (|>) is nicer and cleaner than the old magrittr `%>%` pipe
+
+## functions with the same names 
+
+- there are some functions with identical names across packages. this is a source of some bugs and odd behaviour that is generally hard to understand or detect. 'lag' is a nice example of that. its base version from stats::lag is quite bad as it doesn't actually lag the variables; dplyr::lag (or data.table::shift(type = "lag") are much more reliable. raster::select might cause the code to break if dplyr::select is not mentioned explicitly (but here at least there wouldn't be a mysterious bug, unlike the 'lag' case). another example is 'copy\_labels', that exists in both 'sjalebelled' and 'labelled'. I once didn't examine the exact meaning of the packages, and incorrectly assumed that they would just copy the labels per variables while not changing the data.
+But note that they do change the values and fill in values for the data with NA, but in an opposite direction depending on the order of the data, as the functions work in this way
+```r
+    sjlabelled::copy_labels(new, old)
+    labelled::copy_labels(old, new)
+    # to get them to be 'equivalent', one can e.g., use
+    labelled::copy_labels_from()
+    or set the exact parameters like labelled::copy_labels(to=new, from=old) 
+```
+example:
+```{r}
+labels_df1
+labels_df2
+```
+
+```{r}
+labelled::copy_labels(labels_df1, labels_df2)
+sjlabelled::copy_labels(labels_df1, labels_df2)
+```
+
+# Plotting
+There are much better guides than whatever I'll write, but some important things - 
+a) axis titles are almost always unnecessary, unreadable, ugly and distracting (especially y axis titles). The same information can usually be conveyed using the main plot title
+
+```{r}
+country_panel |> 
+  ggplot() + 
+  geom_line(aes(x = year, y = gdp_trillion, color = iso2))
+```
+Very minimal adjustments make it a lot cleaner:
+```{r}
+country_panel |> 
+  ggplot() + 
+  geom_line(aes(x = year, y = gdp_trillion, color = iso2)) + 
+  theme_minimal() + 
+  theme(axis.title = element_blank()) + 
+  labs(title = "GDP by country over time")
+```
+
+the legend can also often be avoided by placing the labels directly near the lines. The plot can also benefit from clearer colours (that are more colour-blind friendly)
+```{r}
+plot_colors <- c("US" = "#0072B2", "CN" = "#D55E00", "EU" = "#009E73")
+
+line_labels <- country_panel |> 
+  summarise(
+    gdp_trillion = gdp_trillion[which.max(year)],
+    year = max(year),
+    .by = iso2
+  )
+
+country_panel |> 
+  ggplot(aes(x = year, y = gdp_trillion, color = iso2)) + 
+  geom_line(linewidth = 1.1) + 
+  geom_text(
+    data = line_labels,
+    aes(label = iso2),
+    hjust = 0,
+    nudge_x = 0.12,
+    show.legend = FALSE
+  ) +
+  scale_color_manual(values = plot_colors) +
+  scale_x_continuous(breaks = 2019:2024, limits = c(2019, 2024.5)) +
+  theme_minimal() + 
+  theme(
+    axis.title = element_blank(),
+    legend.position = "none"
+  ) + 
+  labs(title = "GDP by country over time")
+```
+
+and a more final version could look something like this:
+```{r}
+country_panel |> 
+  ggplot(aes(x = year, y = gdp_trillion, color = iso2)) + 
+  geom_line(linewidth = 1.2) + 
+  geom_text(
+    data = line_labels,
+    aes(label = iso2),
+    hjust = 0,
+    nudge_x = 0.15,
+    fontface = "bold",
+    show.legend = FALSE
+  ) +
+  scale_color_manual(values = plot_colors) +
+  scale_x_continuous(breaks = 2019:2024, limits = c(2019, 2024.5)) +
+  scale_y_continuous(labels = label_number(suffix = "T")) +
+  labs(
+    title = "The US economy pulled ahead in recent years",
+    subtitle = "GDP in current US dollars",
+    caption = "Source: The World Bank"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.title = element_blank(),
+    legend.position = "none",
+    plot.background = element_rect(fill = "#f7f8f3", color = NA),
+    panel.background = element_rect(fill = "#f7f8f3", color = NA),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold"),
+    plot.caption = element_text(color = "#6b7280")
+  )
+```
+
 
 # Spatial Analysis
 
@@ -49,131 +282,194 @@ sometimes we may want to work with single points in a given unit, rather than th
 if we chooes to use points, how do we select the point? it depends obviously on what we want to achieve.
 centroid is a popular solution, but it suffers from various drawbacks. 
 - it is not necessarily inside the unit. think of units with weird shapes (vietnam), that are composed of many distinct geometries (multiple-island countries, like the philippines) or with holes inside (south africa). if we're calculating the distance of centroid of country x to that of y, and country y's centroid is inside that of x's, it's not ideal...
-- one solution for that would be to use `st_point_on_surface` from the sf package. it guarantees that the point would be on the surface of the unit, and generally is around its middle. however, for certain cases, it might still not capture something we're interested in^[I was working with an admin unit that included a city in the mainland, and an island very far from the mainland. The island was larger, so `st_point_on_surface` has led to a point in the island. In some cases perhaps it's fine, but if we're interested in anything that involves population - then it really does not capture what we want]
-- what about population-weighted centroid? we can use data like GHS-POP to do it (recommended to do it in GEE). However, 1) it might still be outside of the unit, 2) say that there are several population centres in different areas. the pop-weighted centroid is probably going to be between them, which might be good but it'll likely reflect a (relatively) remote point. which might be fine but not always!
-- similarly to the last suggestion, can use 'the most populated point'. for certain things it might be preferable (for others, not as much). one thing to consider here, as many spatial analysis, is the resolution. the most populated 100m place in a country could theoretically be a small town that has an extremely dense point. so aggregating by 1/5/10km might be preferable, but examine the outputs and see whether this captures what you're interested in
+- one solution for that would be to use `st_point_on_surface` from the sf package. it guarantees that the point would be on the surface of the unit, and generally is around its middle. however, for certain cases, it might still not capture something we're interested in. I was working with an admin unit that included a city in the mainland, and an island very far from the mainland. The island was larger, so `st_point_on_surface` has led to a point in the island. In some cases perhaps it's fine, but if we're interested in anything that involves population - then it really does not capture what we want
 
-### finding a 'representitive' category
-there are various spatial datasets that might involve finding some balance between various categories. mines datasets, for example, sometimes have each individual mine as a row, or would have a value of 'suitability for a given commodity' per cell. depends on what we want to have, we might want to aggregate the data per unit. should we sum the number of distinct mines? use the commodity with the highest value of suitability? no obvious answer here but worth thinking about those...
-
-# NAs
-say that we have a data with NA observations:
-```r
-    > df
-# A tibble: 3 Ã— 1
-      x
-  <dbl>
-1     1
-2     2
-3    NA
-
-na.rm = T implies that the NA is 0, such that sum(df$x, na.rm = T) = 3
-na.rm = F would  imply that sum should be NA
-```
-so far not a problem.
-however, especially if we use a loop or across to aggregate over several variables or units. assume we have this dataset
-```r
- df <- tibble(
-  x = c(1, 2, NA),
-  y = c(NA, NA, NA),
-  z = c(1, 2, 3)
+```{r echo=FALSE}
+normal_polygon <- st_polygon(list(
+  matrix(
+    c(
+      0.2, 0.1,
+      4.1, 0.0,
+      4.4, 2.2,
+      3.6, 4.0,
+      1.3, 4.3,
+      0.0, 2.5,
+      0.2, 0.1
+    ),
+    ncol = 2,
+    byrow = TRUE
   )
-```
-and we want to sum over all. 
-```r
+))
 
-df |> 
-  summarise(
-    across(everything(), \(col) sum(col, na.rm = F))
-  )
-      x     y     z
-  <dbl> <int> <dbl>
-1     3     0     6
+hole_polygon <- st_polygon(list(
+  matrix(c(0, 0, 4, 0, 4, 4, 0, 4, 0, 0), ncol = 2, byrow = TRUE),
+  matrix(c(1.2, 1.2, 1.2, 2.8, 2.8, 2.8, 2.8, 1.2, 1.2, 1.2), ncol = 2, byrow = TRUE)
+))
 
-# so the NAs are always 0
-
-df |> 
-  summarise(
-    across(everything(), \(col) sum(col, na.rm = F))
-  )
-      x     y     z
-  <dbl> <int> <dbl>
-1   NA    NA     6
-
-# so the row that has values is always NA
-```
-
-but perhaps we are interested in preserving the NAs only in cases where all rows are NA. then, we'd need to modify the function
-
-```r
-df |> 
-  summarise(across(everything(), \(col) if (all(is.na(col))) NA_real_ else sum(col, na.rm = TRUE)))
-
-     x     y     z
-  <dbl> <dbl> <dbl>
-1     3    NA     6
-```
-
-# R
-
-- I mainly used dplyr, so while data.table is faster, i find the syntax of it a bit less intuitive and prefer to work with the more piped structure of dplyr
-- for faster processes while still using dplyr syntax, dtplyr is very useful. duckdb is way faster and presents another option that is useful for some cases
-- highly recommend to examine updates to the dplyr package (and in general, to packages that are used often). they sometimes include cleaner syntax (example - switching from groupby(x) summarise(y = mean(z)) ungroup() into summarise(y = mean(z), .by = x)
-- the new pipe (|>) is nicer and cleaner than the old magrittr '\%>\%' pipe
-- there are some functions with identical names across packages. this is a source of some bugs and odd behaviour that is generally hard to understand or detect. 'lag' is a nice example of that. its base version from stats::lag is quite bad as it doesn't actually lag the variables; dplyr::lag (or data.table::shift(type = "lag") are much more reliable. raster::select might cause the code to break if dplyr::select is not mentioned explicitly (but here at least there wouldn't be a mysterious bug, unlike the 'lag' case). another example is 'copy\_labels', that exists in both 'sjalebelled' and 'labelled'. I once didn't examine the exact meaning of the packages, and incorrectly assumed that they would just copy the labels per variables while not changing the data.
-But note that they do change the values and fill in values for the data with NA, but in an opposite direction depending on the order of the data, as the functions work in this way
-```r
-    sjlabelled::copy_labels(new, old)
-    labelled::copy_labels(old, new)
-    # to get them to be 'equivalent', one can e.g., use
-    labelled::copy_labels_from()
-    or set the exact parameters like labelled::copy_labels(to=new, from=old) 
-```
-example:
-```r
-    library(dplyr)
-library(labelled)
-library(sjlabelled)
-
-df1 <- tibble(
-  a = 1,
-  b = 2
-) 
-
-df2 <- tibble(
-  a = 1,
-  b = NA_real_
+schematic_units <- st_sf(
+  case = c("compact polygon", "polygon with hole"),
+  geometry = st_sfc(normal_polygon, hole_polygon)
 )
 
-> labelled::copy_labels(df1, df2)
-# A tibble: 1 Ã— 2
-      a     b
-  <dbl> <dbl>
-1     1    NA
-> sjlabelled::copy_labels(df1, df2)
-# A tibble: 1 Ã— 2
-      a     b
-  <dbl> <dbl>
-1     1     2
-> 
-> labelled::copy_labels(df1, df2)
-# A tibble: 1 Ã— 2
-      a     b
-  <dbl> <dbl>
-1     1    NA
-> sjlabelled::copy_labels(df1, df2)
-# A tibble: 1 Ã— 2
-      a     b
-  <dbl> <dbl>
-1     1     2
+centroids <- schematic_units |>
+  st_centroid() |>
+  mutate(point_type = "centroid")
+
+surface_points <- schematic_units |>
+  st_point_on_surface() |>
+  mutate(point_type = "point on surface")
+
+bind_rows(centroids, surface_points) |>
+  ggplot() +
+  geom_sf(data = schematic_units, fill = "#e5e7eb", color = "#4b5563") +
+  geom_sf(aes(color = point_type), size = 2.8) +
+  facet_wrap(~case) +
+  scale_color_manual(values = c("centroid" = "#D55E00", "point on surface" = "#0072B2")) +
+  coord_sf(datum = NA) +
+  theme_minimal() +
+  theme(
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    legend.title = element_blank()
+  )
 ```
 
-# Ploting
-There are much better guides than whatever I'll write, but some important things - 
-a) axis titles are almost always unnecessary, unreadable, ugly and distracting. 
+- what about population-weighted centroid? we can use data like GHS-POP to do it (recommended to do it in GEE). However, 1) it might still be outside of the unit, 2) say that there are several population centres in different areas. the pop-weighted centroid is probably going to be between them, which might be good but it'll likely reflect a (relatively) remote point. which might be fine but not always!
+
+```{r echo=FALSE}
+population_unit <- st_sf(
+  geometry = st_sfc(normal_polygon)
+)
+
+mock_population_grid <- st_sf(
+  geometry = st_make_grid(population_unit, n = c(10, 10))
+) |>
+  st_intersection(population_unit)
+
+grid_centers <- st_coordinates(st_centroid(mock_population_grid))
+
+mock_population_grid <- mock_population_grid |>
+  mutate(
+    x_coord = grid_centers[, 1],
+    y_coord = grid_centers[, 2],
+    population = round(
+      15 +
+        950 * exp(-((x_coord - 1.0)^2 + (y_coord - 3.0)^2) / 0.18) +
+        240 * exp(-((x_coord - 3.2)^2 + (y_coord - 1.0)^2) / 0.14) +
+        180 * exp(-((x_coord - 3.4)^2 + (y_coord - 3.1)^2) / 0.16) +
+        130 * exp(-((x_coord - 2.0)^2 + (y_coord - 1.9)^2) / 0.12)
+    )
+  )
+
+population_weighted_point <- mock_population_grid |>
+  st_drop_geometry() |>
+  summarise(
+    x_coord = weighted.mean(x_coord, population),
+    y_coord = weighted.mean(y_coord, population)
+  ) |>
+  st_as_sf(coords = c("x_coord", "y_coord")) |>
+  mutate(point_type = "population-weighted centroid")
+
+highest_population_point <- mock_population_grid |>
+  slice_max(population, n = 1, with_ties = FALSE) |>
+  st_centroid() |>
+  mutate(point_type = "highest population cell")
+
+population_centroid <- population_unit |>
+  st_centroid() |>
+  mutate(point_type = "centroid")
+
+population_surface_point <- population_unit |>
+  st_point_on_surface() |>
+  mutate(point_type = "point on surface")
+
+population_summary_points <- bind_rows(
+  population_centroid,
+  population_surface_point,
+  population_weighted_point,
+  highest_population_point
+)
+
+population_summary_labels <- population_summary_points |>
+  mutate(
+    point_x = st_coordinates(geometry)[, 1],
+    point_y = st_coordinates(geometry)[, 2],
+    label_x = case_when(
+      point_type == "highest population cell" ~ point_x - 0.16,
+      point_type == "population-weighted centroid" ~ point_x + 0.18,
+      point_type == "centroid" ~ point_x + 0.18,
+      TRUE ~ point_x - 0.16
+    ),
+    label_y = case_when(
+      point_type == "highest population cell" ~ point_y + 0.20,
+      point_type == "population-weighted centroid" ~ point_y - 0.18,
+      point_type == "centroid" ~ point_y + 0.18,
+      TRUE ~ point_y - 0.20
+    )
+  ) |>
+  st_drop_geometry()
+
+ggplot() +
+  geom_sf(
+    data = mock_population_grid,
+    aes(fill = population),
+    color = "white",
+    linewidth = 0.2
+  ) +
+  geom_sf(data = population_unit, fill = NA, color = "#4b5563", linewidth = 0.5) +
+  geom_sf(
+    data = population_summary_points,
+    aes(color = point_type),
+    size = 3.4
+  ) +
+  geom_label(
+    data = population_summary_labels,
+    aes(x = label_x, y = label_y, label = point_type),
+    size = 2.8,
+    linewidth = 0.15,
+    label.padding = unit(0.08, "lines")
+  ) +
+  scale_fill_gradient(low = "white", high = "#b91c1c") +
+  scale_color_manual(
+    values = c(
+      "centroid" = "#D55E00",
+      "point on surface" = "#0072B2",
+      "population-weighted centroid" = "#009E73",
+      "highest population cell" = "#CC79A7"
+    )
+  ) +
+  coord_sf(datum = NA, expand = TRUE) +
+  theme_minimal() +
+  theme(
+    axis.title = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    legend.position = "none"
+  )
+```
+
+- similarly to the last suggestion, can use 'the most populated point'. for certain things it might be preferable (for others, not as much). one thing to consider here, as many spatial analysis, is the resolution. the most populated 100m place in a country could theoretically be a small town that has an extremely dense point. so aggregating by 1/5/10km might be preferable, but examine the outputs and see whether this captures what you're interested in
+
+### finding a 'representative' category
+there are various spatial datasets that might involve finding some balance between various categories. mines datasets, for example, sometimes have each individual mine as a row, or would have a value of 'suitability for a given commodity' per cell. depends on what we want to have, we might want to aggregate the data per unit. should we sum the number of distinct mines? use the commodity with the highest value of suitability? no obvious answer here but worth thinking about those...
+
+# empirical
+log() of low numbers is pretty useless. not unknown, but worth paying attention to
+
+## shift share
+
+# Debugging and validating results
 
 # Specific datasets
 
 ## WDPA (protected areas)
 
 ## IPUMS
+
+# Suggestions for stuff to add / remove
+
+- add a short opening paragraph about what kinds of RA work this is based on
+- add one concrete example of a result validation workflow
+- add a small checklist at the end
+- maybe remove or shorten any examples that are too project-specific once the structure is clearer
