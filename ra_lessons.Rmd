@@ -9,120 +9,188 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(message = FALSE, warning = FALSE)
-
-pacman::p_load(dplyr, labelled, sjlabelled, tidyr, ggplot2, scales, sf)
-
-# country_panel <- WDI::WDI(
-#   country = c("US", "CN", "EUU"),
-#   indicator = "NY.GDP.MKTP.CD",
-#   start = 2019,
-#   end = 2024
-# ) |>
-#   transmute(
-#     iso2 = iso2c,
-#     country_name = country,
-#     year,
-#     gdp_trillion = round(NY.GDP.MKTP.CD / 1e12, 1)
-#   ) |>
-#   arrange(iso2, year)
-# saveRDS(country_panel, "data/wdi_gdp_country_panel.rds")
-
-country_panel <- readRDS("data/wdi_gdp_country_panel.rds")
-
-country_panel_with_na <- country_panel |>
-  mutate(
-    gdp_trillion = if_else(
-      (iso2 == "EU" & year == 2021) | (iso2 == "CN" & year == 2022),
-      NA_real_,
-      gdp_trillion
-    ),
-    investment_trillion = if_else(
-      iso2 == "EU",
-      NA_real_,
-      round(gdp_trillion * 0.22, 1)
-    )
-  )
-
-country_df <- country_panel |>
-  filter(year == 2024) |>
-  select(iso2, country_name, gdp_trillion)
-
-na_df <- country_panel_with_na |>
-  filter(year %in% 2021:2023) |>
-  select(year, iso2, gdp_trillion, investment_trillion) |>
-  pivot_wider(
-    names_from = iso2,
-    values_from = c(gdp_trillion, investment_trillion),
-    names_glue = "{.value}_{iso2}"
-  ) |>
-  select(gdp_trillion_US, gdp_trillion_CN, investment_trillion_EU)
-
-labels_df1 <- country_df |>
-  select(iso2, gdp_trillion)
-
-labels_df2 <- country_df |>
-  mutate(gdp_trillion = if_else(iso2 == "EU", NA_real_, gdp_trillion)) |>
-  select(iso2, gdp_trillion)
 ```
 
 # Introduction
 
 this wouldnt speak much about measurement issues in datasets
 
+```{r}
+pacman::p_load(
+  dplyr, labelled, sjlabelled, tidyr, ggplot2, scales, sf,
+  here, readr
+  )
+
+options(scipen = 999)
+```
+
 # Country level analysis
 
-### Country names
-Certainly recommend to use country codes (iso2/3) rather than country names, for consistency between datasets. however, even those may have certain levels of inconsistency or potential issues. e.g., south sudan may be SSD or SDS. 
-```{r eval=FALSE}
-# country_panel <- WDI::WDI(
-#   country = c("US", "CN", "EUU"),
-#   indicator = "NY.GDP.MKTP.CD",
-#   start = 2019,
-#   end = 2024
-# ) |>
-#   transmute(
-#     iso2 = iso2c,
-#     country_name = country,
-#     year,
-#     gdp_trillion = round(NY.GDP.MKTP.CD / 1e12, 1)
-#   ) |>
-#   arrange(iso2, year)
-# saveRDS(country_panel, "data/wdi_gdp_country_panel.rds")
+A lot of the analysis I have done was at the country level, or used countries as parent units. Thus, most of this text is going to use countries as example units, but here are some tips on dealing with country level data:
 
-country_panel <- readRDS("data/wdi_gdp_country_panel.rds")
-```
-WDI uses `EUU` to request the European Union, although the returned iso2 code is `EU`.
+## Country names
+Country names can be inconsistent between datasets. 'Ivory Coast' and 'Cote d'Ivoire' refer to the same country. While keeping the name can be useful for plots, tables and understanding the data, for joins it is much preferable to use country codes. ISO2 or ISO3 are great for that. Note, however, that even country codes may have some inconsistency, some examples -
+1) South Sudan's ISO3 is usually 'SSD', but I've seen some datasets where it was 'SDS' 
+2) Namibia's ISO2 is 'NA'. Depending on the function that reads the data, it may be read as NA
+
+Normally the WDI includes data on aggregates (if you download directly with 'WDI::WDI(), use extra = T')). For illustration, however, I have downloaded the data from the WDI website as csv. https://data.worldbank.org/indicator/SP.POP.TOTL and https://data.worldbank.org/indicator/NY.GDP.MKTP.KD
 
 ```{r}
-country_df
-```
+selected_iso2 <- c("US", "CN", "EU")
 
-```{r}
-country_panel
-```
+pop <- read_csv(here("data", "API_SP.POP.TOTL_DS2_en_csv_v2_33112.csv"), skip = 4) |>
+  pivot_longer(
+    cols = matches("^\\d{4}$"),
+    names_to = "year",
+    values_to = "pop"
+  ) |>
+  transmute(
+    iso3 = `Country Code`,
+    country_name = `Country Name`,
+    year = as.integer(year),
+    pop
+  )
 
-### Country's consistency over time
+gdp <- read_csv(here("data", "API_NY.GDP.MKTP.KD_DS2_en_csv_v2_34247.csv"), skip = 4) |>
+  pivot_longer(
+    cols = matches("^\\d{4}$"),
+    names_to = "year",
+    values_to = "gdp"
+  ) |>
+  transmute(
+    iso3 = `Country Code`,
+    country_name = `Country Name`,
+    year = as.integer(year),
+    gdp
+  )
 
-pay special attention to countries that changed their borders over time, or have received independence. sudan vs south sudan. depending on the year, montenegro might be part of yugoslavia, serbia and montenegro, or montenegro - but the same is true for kosovo (despite not being mentioned in the name of 'serbia and montenegro'), but in kosovo's case it also might not exist in certain datasets. taiwan might be referred to in different ways depending on the dataset.
-
-### country aggregates
-in one of the projects i was working on there were certain countries in our sample, and all of the other countries were aggregated as 'rest of the world'. now, if want to aggregate the rest of the world's values of some variable (e.g., sum its gdp) - on paper we could use something like US vs the rest:
-```{r}
-country_panel |> 
-  mutate(iso2 = if_else(iso2 == "US", "US", "ROW")) |>
-  summarise(gdp_trillion = sum(gdp_trillion), .by = c(iso2, year)) |>
+country_panel_all <- full_join(pop, gdp, by = c("iso3", "country_name", "year")) |>
+  transmute(
+    iso2 = countrycode::countrycode(iso3, "iso3c", "iso2c", warn = FALSE),
+    iso3,
+    country_name,
+    year,
+    gdp,
+    gdp_b = round(gdp / 1e9, 1),
+    gdp_t = round(gdp / 1e12, 1),
+    pop
+  ) |>
+  filter(year >= 2000) |>
   arrange(iso2, year)
+
+saveRDS(country_panel_all, here("data", "wdi_gdp_country_panel_all.rds"))
 ```
-however, in some datasets there may be aggregates (e.g., "Middle East"). In some datasets there may be columns that refer to those which can help excluding them (e.g., for WDI, use region != "Aggregates"), but not always. and the names of the 'aggregate' countries might be different across different datasets (e.g., in two different datasets of FAOSTAT, there is in one dataset (https://www.fao.org/faostat/en/#data/FBSH) an aggregated region of 'Low Income Food Deficit Countries'.
-but in another (https://www.fao.org/faostat/en/#data/QCL) this appears as 'Low Income Food Deficit Countries (LIFDCs)'. So in this case, filtering only one exact name would not work across both datasets 
+
+Now, this version does not already contain a column referring to whether a unit is an aggregate or not (the data actually exists in the metadata, but I'm not using it on purpose). There are many ways to deal with it, one (probably not the best one, but it highlights a potential problem) is using the 'countrycode' package. I converted all the ISO3s into ISO2, which leaves NAs at all the aggregate units in the newly created ISO2 column. However, if we're paying close attention, see that Kosovo also does not have ISO2 here.
+
+```{r}
+aggregate_or_unmatched_names <- country_panel_all |> 
+  filter(is.na(iso2)) |> 
+  distinct(country_name) |> 
+  pull(country_name)
+
+cat(paste(aggregate_or_unmatched_names, collapse = ", "))
+```
+
+Thus, I'd manually add the ISO3 for Kosovo (and the EU, as I want to use it).
+
+```{r}
+country_panel <- country_panel_all |> 
+  mutate(
+    iso2 = case_when(
+      iso3 == "XKX" ~ "XK",
+      iso3 == "EUU" ~ "EU", 
+      TRUE ~ iso2
+      )
+  ) |> 
+  filter(!is.na(iso2))
+```
+
+## country aggregates
+
+In some datasets there may be aggregates (e.g., "Middle East"). In some datasets there are variables that refer to those, but not always, and the names of the 'aggregate' countries might be different across different datasets (e.g., in two different datasets of FAOSTAT, there is in one dataset (https://www.fao.org/faostat/en/#data/FBSH) an aggregated region of 'Low Income Food Deficit Countries', but in another (https://www.fao.org/faostat/en/#data/QCL) this appears as 'Low Income Food Deficit Countries (LIFDCs)'. Given that there is not always an ISO2/3 equivalent for each aggregate, one needs to pay attention to those cases. 
+
+<!-- What if we want to aggregate multiple rows. I've removed before the EU as an aggregate, but let's assume that we'd want to construct it from scratch: -->
+<!-- ```{r} -->
+<!-- eu_df <- country_panel |>  -->
+<!--   mutate( -->
+<!--     iso2 = if_else(iso2 %in% eu_iso2, "EU", iso2), -->
+<!--     country_name = if_else(iso2 == "EU", "European Union", country_name) -->
+<!--   ) |> -->
+<!--   summarise( -->
+<!--     gdp = if (all(is.na(gdp))) NA_real_ else sum(gdp, na.rm = TRUE), -->
+<!--     gdp_b = round(gdp / 1e9, 1), -->
+<!--     gdp_t = round(gdp / 1e12, 1), -->
+<!--     pop = sum(pop, na.rm = TRUE), -->
+<!--     .by = c(iso2, country_name, year) -->
+<!--   ) -->
+<!-- ``` -->
+
+<!-- # eu_comparison <- eu_df |>  -->
+<!-- #   filter(iso2 == "EU") |>  -->
+<!-- #   select(year, eu_constructed_gdp_t = gdp_t, eu_constructed_pop = pop) |> -->
+<!-- #   left_join( -->
+<!-- #     country_panel_all |>  -->
+<!-- #       filter(iso3 == "EUU") |>  -->
+<!-- #       select(year, eu_wdi_gdp_t = gdp_t, eu_wdi_pop = pop), -->
+<!-- #     by = "year" -->
+<!-- #   ) |> -->
+<!-- #   mutate( -->
+<!-- #     gdp_diff_t = round(eu_constructed_gdp_t - eu_wdi_gdp_t, 2), -->
+<!-- #     pop_diff = eu_constructed_pop - eu_wdi_pop -->
+<!-- #   ) -->
+<!-- #  -->
+<!-- # eu_comparison -->
+
+<!-- Importantly for cases like this, ideally we'd want to verify that the values make sense compared to some reference data. For instance, I would try to find data on the aggregate (EU, in this case) from another source - IMF, Eurostat, etc, asking an AI whether it looks plausible etc.  -->
+
+
+```{r include=FALSE}
+country_df <- country_panel |>
+  filter(year == 2024) |>
+  select(iso2, country_name, gdp_t)
+
+na_df <- country_panel |>
+  filter(iso2 %in% c("CU", "ER", "BO"))|>
+  select(year, country_name, gdp_b) |>
+  pivot_wider(
+    names_from = country_name,
+    values_from = c(gdp_b),
+    names_glue = "{.value}_{country_name}"
+  ) |>
+  select(gdp_b_Cuba, gdp_b_Eritrea, gdp_b_Bolivia)
+
+labels_df1 <- country_df |>
+  select(iso2, gdp_t)
+
+labels_df2 <- country_df |>
+  mutate(gdp_t = if_else(iso2 == "EU", NA_real_, gdp_t)) |>
+  select(iso2, gdp_t)
+
+```
+
+## Geographies consistency over time
+
+Various geographical units of observations do not have consistent boundaries over time. Countries change their borders, gain independence or split; admin units sometimes change have changed their borders. Different datasets treat those changes differently - perhaps a value in a given year refers to the current border or the old one. 
+When working with country-level data, for example, pay attention to countries whose borders have changed in the period of analysis (or recently!). 'Sudan' might reflect the current state of Sudan, or also the values of South Sudan. Montenegro might be part of Yugoslavia, Serbia and Montenegro, or Montenegro; the same is true for Kosovo (despite not being mentioned in the name of 'Serbia and Montenegro'), although Kosovo might not even exist in certain datasets. Taiwan might be referred to in different ways, depending on the dataset.
+
+This, for example, looks rather fine - there are no obvious spikes in the data around the year of independence:
+```{r}
+country_panel |>
+  filter(iso2 %in% c("SD", "SS"), year %in% 2006:2014) |>
+  ggplot() + 
+  geom_line(aes(x = year, y = pop, group = country_name, color = country_name))
+
+```
+
 
 # NAs
 say that we have a data with NA observations:
 ```{r}
 na_df |> 
-  select(gdp_trillion_CN)
+  select(gdp_b_Cuba)
 ```
-na.rm = T implies that the NA is 0, such that sum(na_df$gdp_trillion_CN, na.rm = T) would still return a value
+na.rm = T implies that the NA is 0, such that sum(na_df$gdp_b_Cuba, na.rm = T) would still return a value
 na.rm = F would  imply that sum should be NA
 
 so far not a problem.
@@ -138,7 +206,7 @@ na_df |>
   )
 ```
 
-# so the NAs are always 0
+so the NAs are always 0
 
 ```{r}
 na_df |> 
@@ -147,7 +215,7 @@ na_df |>
   )
 ```
 
-# so the column that has values and NAs is always NA
+so the column that has values and NAs is always NA
 
 but perhaps we are interested in preserving the NAs only in cases where all rows are NA. then, we'd need to modify the function
 
@@ -162,8 +230,28 @@ na_df |>
 
 - I mainly used dplyr, so while data.table is faster, i find the syntax of it a bit less intuitive and prefer to work with the more piped structure of dplyr
 - for faster processes while still using dplyr syntax, dtplyr is very useful. duckdb is way faster and presents another option that is useful for some cases
-- highly recommend to examine updates to the dplyr package (and in general, to packages that are used often). they sometimes include cleaner syntax (example - switching from groupby(x) summarise(y = mean(z)) ungroup() into summarise(y = mean(z), .by = x)
+- highly recommend to examine updates to the dplyr package (and in general, to packages that are used often). 
 - the new pipe (|>) is nicer and cleaner than the old magrittr `%>%` pipe
+
+see the difference between coding styles:
+
+```{r}
+country_panel %>% 
+  group_by(iso2) %>%
+  summarise(
+    avg_gdp = mean(gdp_t)
+    ) %>%
+  ungroup()
+```
+
+```{r}
+country_panel |> 
+  summarise(
+    avg_gdp = mean(gdp_t),
+    .by = iso2
+    ) 
+```
+Decide for yourself but I much prefer the latter.
 
 ## functions with the same names 
 
@@ -194,16 +282,20 @@ a) axis titles are almost always unnecessary, unreadable, ugly and distracting (
 ```{r}
 country_panel |> 
   ggplot() + 
-  geom_line(aes(x = year, y = gdp_trillion, color = iso2))
+  geom_line(aes(x = year, y = gdp_t, color = iso2)) +
+  scale_x_continuous(breaks = seq(2000, 2024, 4), limits = c(2000, 2024)) +
+  scale_y_continuous(limits = c(0, NA), labels = label_number(suffix = "T"))
 ```
 Very minimal adjustments make it a lot cleaner:
 ```{r}
 country_panel |> 
   ggplot() + 
-  geom_line(aes(x = year, y = gdp_trillion, color = iso2)) + 
+  geom_line(aes(x = year, y = gdp_t, color = iso2)) + 
+  scale_x_continuous(breaks = seq(2000, 2024, 4), limits = c(2000, 2024)) +
+  scale_y_continuous(limits = c(0, NA), labels = label_number(suffix = "T")) +
   theme_minimal() + 
   theme(axis.title = element_blank()) + 
-  labs(title = "GDP by country over time")
+  labs(title = "China's GDP growth relative to the US and EU")
 ```
 
 the legend can also often be avoided by placing the labels directly near the lines. The plot can also benefit from clearer colours (that are more colour-blind friendly)
@@ -212,13 +304,13 @@ plot_colors <- c("US" = "#0072B2", "CN" = "#D55E00", "EU" = "#009E73")
 
 line_labels <- country_panel |> 
   summarise(
-    gdp_trillion = gdp_trillion[which.max(year)],
+    gdp_t = gdp_t[which.max(year)],
     year = max(year),
     .by = iso2
   )
 
 country_panel |> 
-  ggplot(aes(x = year, y = gdp_trillion, color = iso2)) + 
+  ggplot(aes(x = year, y = gdp_t, color = iso2)) + 
   geom_line(linewidth = 1.1) + 
   geom_text(
     data = line_labels,
@@ -228,19 +320,20 @@ country_panel |>
     show.legend = FALSE
   ) +
   scale_color_manual(values = plot_colors) +
-  scale_x_continuous(breaks = 2019:2024, limits = c(2019, 2024.5)) +
+  scale_x_continuous(breaks = seq(2000, 2024, 4), limits = c(2000, 2024.5)) +
+  scale_y_continuous(limits = c(0, NA), labels = label_number(suffix = "T")) +
   theme_minimal() + 
   theme(
     axis.title = element_blank(),
     legend.position = "none"
   ) + 
-  labs(title = "GDP by country over time")
+  labs(title = "China's GDP growth relative to the US and EU")
 ```
 
 and a more final version could look something like this:
 ```{r}
 country_panel |> 
-  ggplot(aes(x = year, y = gdp_trillion, color = iso2)) + 
+  ggplot(aes(x = year, y = gdp_t, color = iso2)) + 
   geom_line(linewidth = 1.2) + 
   geom_text(
     data = line_labels,
@@ -251,11 +344,11 @@ country_panel |>
     show.legend = FALSE
   ) +
   scale_color_manual(values = plot_colors) +
-  scale_x_continuous(breaks = 2019:2024, limits = c(2019, 2024.5)) +
-  scale_y_continuous(labels = label_number(suffix = "T")) +
+  scale_x_continuous(breaks = seq(2000, 2024, 4), limits = c(2000, 2024.5)) +
+  scale_y_continuous(limits = c(0, NA), labels = label_number(suffix = "T")) +
   labs(
-    title = "The US economy pulled ahead in recent years",
-    subtitle = "GDP in current US dollars",
+    title = "China narrowed the gap with the US",
+    subtitle = "GDP, constant 2015 US dollars",
     caption = "Source: The World Bank"
   ) +
   theme_minimal(base_size = 12) +

@@ -1,4 +1,7 @@
 *
 !*/
 !.gitignore
+!CONTEXT.md
+!README.md
 !ra_lessons.Rmd
+.Rproj.user
