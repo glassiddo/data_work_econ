@@ -4,6 +4,7 @@ output:
   html_document:
     toc: true
     toc_depth: 3
+    code_folding: hide
     css: styles.css
 ---
 
@@ -24,6 +25,81 @@ pacman::p_load(
 options(scipen = 999)
 ```
 
+# R
+
+## style and speed
+
+- I mainly used dplyr, so while data.table is faster, i find the syntax of it a bit less intuitive and prefer to work with the more piped structure of dplyr
+- for faster processes while still using dplyr syntax, dtplyr is very useful. duckdb is way faster and presents another option that is useful for some cases
+- highly recommend to examine updates to the dplyr package (and in general, to packages that are used often). 
+- the new pipe (|>) is nicer and cleaner than the old magrittr `%>%` pipe
+
+see the difference between coding styles:
+
+```{r}
+style_df <- tibble::tibble(
+  iso2 = c("US", "US", "CN", "CN"),
+  gdp_t = c(25, 26, 17, 18)
+)
+
+style_df
+```
+
+```{r}
+style_df %>% 
+  group_by(iso2) %>%
+  summarise(
+    avg_gdp = mean(gdp_t)
+    ) %>%
+  ungroup()
+```
+
+```{r}
+style_df |> 
+  summarise(
+    avg_gdp = mean(gdp_t),
+    .by = iso2
+    ) 
+```
+Decide for yourself but I much prefer the latter.
+
+## functions with the same names 
+
+- there are some functions with identical names across packages. this is a source of some bugs and odd behaviour that is generally hard to understand or detect. 'lag' is a nice example of that. its base version from stats::lag is quite bad as it doesn't actually lag the variables; dplyr::lag (or data.table::shift(type = "lag") are much more reliable. raster::select might cause the code to break if dplyr::select is not mentioned explicitly (but here at least there wouldn't be a mysterious bug, unlike the 'lag' case). another example is 'copy\_labels', that exists in both 'sjlabelled' and 'labelled'. I once didn't examine the exact meaning of the packages, and incorrectly assumed that they would just copy the labels per variables while not changing the data.
+But note that they do change the values and fill in values for the data with NA, but in an opposite direction depending on the order of the data, as the functions work in this way
+```r
+    sjlabelled::copy_labels(new, old)
+    labelled::copy_labels(old, new)
+    # to get them to be 'equivalent', one can e.g., use
+    labelled::copy_labels_from()
+    or set the exact parameters like labelled::copy_labels(to=new, from=old) 
+```
+example:
+
+`old_labels` is a labelled version of the data, and `new_data` is a newer version of the data that we want to copy the labels into.
+
+```{r include=FALSE}
+old_labels <- tibble::tibble(
+  x = labelled(c(1, 2), labels = c(no = 1, yes = 2)),
+  y = labelled(c(10, 20), labels = c(low = 10, high = 20))
+)
+
+new_data <- tibble::tibble(
+  x = c(NA_real_, 99),
+  y = c(30, 40)
+)
+```
+
+```{r}
+old_labels
+new_data
+```
+
+```{r}
+labelled::copy_labels(old_labels, new_data)
+sjlabelled::copy_labels(old_labels, new_data)
+```
+
 # Country level analysis
 
 A lot of the analysis I have done was at the country level, or used countries as parent units. Thus, most of this text is going to use countries as example units, but here are some tips on dealing with country level data:
@@ -33,7 +109,7 @@ Country names can be inconsistent between datasets. 'Ivory Coast' and 'Cote d'Iv
 1) South Sudan's ISO3 is usually 'SSD', but I've seen some datasets where it was 'SDS' 
 2) Namibia's ISO2 is 'NA'. Depending on the function that reads the data, it may be read as NA
 
-Normally the WDI includes data on aggregates (if you download directly with 'WDI::WDI(), use extra = T')). For illustration, however, I have downloaded the data from the WDI website as csv. https://data.worldbank.org/indicator/SP.POP.TOTL and https://data.worldbank.org/indicator/NY.GDP.MKTP.KD
+Normally the WDI includes data on aggregates (if you download directly with 'WDI::WDI(), use extra = TRUE')). For illustration, however, I have downloaded the data from the WDI website as csv. https://data.worldbank.org/indicator/SP.POP.TOTL and https://data.worldbank.org/indicator/NY.GDP.MKTP.KD
 
 ```{r}
 selected_iso2 <- c("US", "CN", "EU")
@@ -71,8 +147,8 @@ country_panel_all <- full_join(pop, gdp, by = c("iso3", "country_name", "year"))
     country_name,
     year,
     gdp,
-    gdp_b = round(gdp / 1e9, 1),
-    gdp_t = round(gdp / 1e12, 1),
+    gdp_b = round(gdp / 1e9, 5),
+    gdp_t = round(gdp / 1e12, 5),
     pop
   ) |>
   filter(year >= 2000) |>
@@ -145,30 +221,6 @@ In some datasets there may be aggregates (e.g., "Middle East"). In some datasets
 <!-- Importantly for cases like this, ideally we'd want to verify that the values make sense compared to some reference data. For instance, I would try to find data on the aggregate (EU, in this case) from another source - IMF, Eurostat, etc, asking an AI whether it looks plausible etc.  -->
 
 
-```{r include=FALSE}
-country_df <- country_panel |>
-  filter(year == 2024) |>
-  select(iso2, country_name, gdp_t)
-
-na_df <- country_panel |>
-  filter(iso2 %in% c("CU", "ER", "BO"))|>
-  select(year, country_name, gdp_b) |>
-  pivot_wider(
-    names_from = country_name,
-    values_from = c(gdp_b),
-    names_glue = "{.value}_{country_name}"
-  ) |>
-  select(gdp_b_Cuba, gdp_b_Eritrea, gdp_b_Bolivia)
-
-labels_df1 <- country_df |>
-  select(iso2, gdp_t)
-
-labels_df2 <- country_df |>
-  mutate(gdp_t = if_else(iso2 == "EU", NA_real_, gdp_t)) |>
-  select(iso2, gdp_t)
-
-```
-
 ## Geographies consistency over time
 
 Various geographical units of observations do not have consistent boundaries over time. Countries change their borders, gain independence or split; admin units sometimes change have changed their borders. Different datasets treat those changes differently - perhaps a value in a given year refers to the current border or the old one. 
@@ -183,172 +235,174 @@ country_panel |>
 
 ```
 
-
 # NAs
-say that we have a data with NA observations:
+Assume that we have a dataset with some missing values:
 ```{r}
-na_df |> 
-  select(gdp_b_Cuba)
-```
-na.rm = T implies that the NA is 0, such that sum(na_df$gdp_b_Cuba, na.rm = T) would still return a value
-na.rm = F would  imply that sum should be NA
+na_df <- country_panel |>
+  filter(
+    iso2 %in% c("CU", "ER", "BO"), 
+    year %in% 2023:2025
+    ) |>
+  select(year, country_name, gdp_b) |> 
+  pivot_wider(
+    names_from = country_name,
+    values_from = c(gdp_b)
+  )
 
-so far not a problem.
-however, especially if we use a loop or across to aggregate over several variables or units. assume we have this dataset
-```{r}
 na_df
 ```
-and we want to sum over all. 
+We want to aggregate that data. The main options are 1) na.rm = TRUE, which removes the NAs before calculating, such that sum(df$x, na.rm = TRUE) would still return a value. For sums this can look like treating NA as 0, and if all values are NA it returns 0, but for means it also changes the denominator; 2) na.rm = FALSE, which forces the aggregation to have NA if any of the values is NA 
+
+Especially if we use a loop or across to aggregate over several variables or units, it can be a problem
+Say that we want to sum gdp for each of those three countries in this period.  
 ```{r}
-na_df |> 
-  summarise(
-    across(everything(), \(col) sum(col, na.rm = TRUE))
+na_df_long <- na_df |> 
+  pivot_longer(
+    -year,
+    names_to = "country_name",
+    values_to = "gdp_b"
+  )
+
+na_rm_options <- c("na.rm = TRUE", "na.rm = FALSE", "NA only if all missing")
+
+bind_rows(
+  na_df_long |> 
+    summarise(
+      method = "na.rm = TRUE",
+      sum = sum(gdp_b, na.rm = TRUE),
+      .by = country_name
+    ),
+  na_df_long |> 
+    summarise(
+      method = "na.rm = FALSE",
+      sum = sum(gdp_b, na.rm = FALSE),
+      .by = country_name
+    ),
+  na_df_long |> 
+    summarise(
+      method = "NA only if all missing",
+      sum = if (all(is.na(gdp_b))) NA_real_ else sum(gdp_b, na.rm = TRUE),
+      .by = country_name
+    )
+  ) |> 
+  arrange(country_name, match(method, na_rm_options)) |> 
+  pivot_wider(
+    names_from = method,
+    values_from = sum
+  ) |> 
+  left_join(
+    na_df_long |> 
+      summarise(
+        n_observed = sum(!is.na(gdp_b)),
+        .by = country_name
+      ),
+    by = "country_name"
   )
 ```
 
-so the NAs are always 0
-
-```{r}
-na_df |> 
-  summarise(
-    across(everything(), \(col) sum(col, na.rm = FALSE))
-  )
-```
-
-so the column that has values and NAs is always NA
-
-but perhaps we are interested in preserving the NAs only in cases where all rows are NA. then, we'd need to modify the function
-
-```{r}
-na_df |> 
-  summarise(across(everything(), \(col) if (all(is.na(col))) NA_real_ else sum(col, na.rm = TRUE)))
-```
-
-# R
-
-## style and speed
-
-- I mainly used dplyr, so while data.table is faster, i find the syntax of it a bit less intuitive and prefer to work with the more piped structure of dplyr
-- for faster processes while still using dplyr syntax, dtplyr is very useful. duckdb is way faster and presents another option that is useful for some cases
-- highly recommend to examine updates to the dplyr package (and in general, to packages that are used often). 
-- the new pipe (|>) is nicer and cleaner than the old magrittr `%>%` pipe
-
-see the difference between coding styles:
-
-```{r}
-country_panel %>% 
-  group_by(iso2) %>%
-  summarise(
-    avg_gdp = mean(gdp_t)
-    ) %>%
-  ungroup()
-```
-
-```{r}
-country_panel |> 
-  summarise(
-    avg_gdp = mean(gdp_t),
-    .by = iso2
-    ) 
-```
-Decide for yourself but I much prefer the latter.
-
-## functions with the same names 
-
-- there are some functions with identical names across packages. this is a source of some bugs and odd behaviour that is generally hard to understand or detect. 'lag' is a nice example of that. its base version from stats::lag is quite bad as it doesn't actually lag the variables; dplyr::lag (or data.table::shift(type = "lag") are much more reliable. raster::select might cause the code to break if dplyr::select is not mentioned explicitly (but here at least there wouldn't be a mysterious bug, unlike the 'lag' case). another example is 'copy\_labels', that exists in both 'sjalebelled' and 'labelled'. I once didn't examine the exact meaning of the packages, and incorrectly assumed that they would just copy the labels per variables while not changing the data.
-But note that they do change the values and fill in values for the data with NA, but in an opposite direction depending on the order of the data, as the functions work in this way
-```r
-    sjlabelled::copy_labels(new, old)
-    labelled::copy_labels(old, new)
-    # to get them to be 'equivalent', one can e.g., use
-    labelled::copy_labels_from()
-    or set the exact parameters like labelled::copy_labels(to=new, from=old) 
-```
-example:
-```{r}
-labels_df1
-labels_df2
-```
-
-```{r}
-labelled::copy_labels(labels_df1, labels_df2)
-sjlabelled::copy_labels(labels_df1, labels_df2)
-```
+so the table lets us see the three choices together: when we use na.rm = FALSE, a column that has values and NAs is always NA. But perhaps we are interested in preserving the NAs only in cases where all rows are NA. then, we need to modify the function. It is also often useful to show the amount of missingness itself. Otherwise, two columns can have the same sum while one of them is based on much less data.
 
 # Plotting
 There are much better guides than whatever I'll write, but some important things - 
 a) axis titles are almost always unnecessary, unreadable, ugly and distracting (especially y axis titles). The same information can usually be conveyed using the main plot title
 
 ```{r}
-country_panel |> 
+eu27_countries <- c(
+  "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR",
+  "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL",
+  "PL", "PT", "RO", "SK", "SI", "ES", "SE"
+)
+highlight_countries <- c("IE", "LU", "SE")
+
+plot_df <- country_panel |> 
+  filter(
+    iso2 %in% eu27_countries,
+    year >= 2000,
+    year <= 2024
+  ) |> 
+  mutate(
+    gdp_pc = gdp / pop,
+    highlighted = if_else(iso2 %in% highlight_countries, iso2, "Other countries")
+  )
+
+plot_df |> 
   ggplot() + 
-  geom_line(aes(x = year, y = gdp_t, color = iso2)) +
+  geom_line(aes(x = year, y = gdp_pc, color = iso2)) +
   scale_x_continuous(breaks = seq(2000, 2024, 4), limits = c(2000, 2024)) +
-  scale_y_continuous(limits = c(0, NA), labels = label_number(suffix = "T"))
+  scale_y_continuous(limits = c(0, NA), labels = label_dollar())
 ```
 Very minimal adjustments make it a lot cleaner:
 ```{r}
-country_panel |> 
+plot_df |> 
   ggplot() + 
-  geom_line(aes(x = year, y = gdp_t, color = iso2)) + 
+  geom_line(aes(x = year, y = gdp_pc, color = iso2)) + 
   scale_x_continuous(breaks = seq(2000, 2024, 4), limits = c(2000, 2024)) +
-  scale_y_continuous(limits = c(0, NA), labels = label_number(suffix = "T")) +
+  scale_y_continuous(limits = c(0, NA), labels = label_dollar()) +
   theme_minimal() + 
   theme(axis.title = element_blank()) + 
-  labs(title = "China's GDP growth relative to the US and EU")
+  labs(title = "GDP per capita across EU countries")
 ```
 
-the legend can also often be avoided by placing the labels directly near the lines. The plot can also benefit from clearer colours (that are more colour-blind friendly)
+the legend can also often be avoided by placing the labels directly near the lines. The plot can also benefit from clearer colours (that are more colour-blind friendly). Say that we want to focus on Ireland, Luxembourg, and Sweden
 ```{r}
-plot_colors <- c("US" = "#0072B2", "CN" = "#D55E00", "EU" = "#009E73")
+plot_colors <- c(
+  "IE" = "#0072B2",
+  "LU" = "#D55E00",
+  "SE" = "#009E73",
+  "Other countries" = "#b8bec6"
+)
 
-line_labels <- country_panel |> 
+line_labels <- plot_df |> 
+  filter(iso2 %in% highlight_countries) |> 
   summarise(
-    gdp_t = gdp_t[which.max(year)],
+    gdp_pc = gdp_pc[which.max(year)],
     year = max(year),
+    label = country_name[which.max(year)],
     .by = iso2
   )
 
-country_panel |> 
-  ggplot(aes(x = year, y = gdp_t, color = iso2)) + 
-  geom_line(linewidth = 1.1) + 
+plot_df |> 
+  ggplot(aes(x = year, y = gdp_pc, group = iso2)) + 
+  geom_line(aes(color = highlighted), linewidth = 0.9, alpha = 0.85) + 
   geom_text(
     data = line_labels,
-    aes(label = iso2),
+    aes(label = iso2, color = iso2),
     hjust = 0,
-    nudge_x = 0.12,
+    nudge_x = 0.25,
     show.legend = FALSE
   ) +
   scale_color_manual(values = plot_colors) +
-  scale_x_continuous(breaks = seq(2000, 2024, 4), limits = c(2000, 2024.5)) +
-  scale_y_continuous(limits = c(0, NA), labels = label_number(suffix = "T")) +
+  scale_x_continuous(breaks = seq(2000, 2024, 4), limits = c(2000, 2025.5)) +
+  scale_y_continuous(limits = c(0, NA), labels = label_dollar()) +
   theme_minimal() + 
   theme(
     axis.title = element_blank(),
-    legend.position = "none"
+    legend.position = "none",
+    plot.margin = margin(5.5, 60, 5.5, 5.5)
   ) + 
-  labs(title = "China's GDP growth relative to the US and EU")
+  coord_cartesian(clip = "off") +
+  labs(title = "Ireland spiked toward the EU's richest")
 ```
 
 and a more final version could look something like this:
 ```{r}
-country_panel |> 
-  ggplot(aes(x = year, y = gdp_t, color = iso2)) + 
-  geom_line(linewidth = 1.2) + 
+plot_df |> 
+  ggplot(aes(x = year, y = gdp_pc, group = iso2)) + 
+  geom_line(aes(color = highlighted), linewidth = 0.9, alpha = 0.8) + 
   geom_text(
     data = line_labels,
-    aes(label = iso2),
+    aes(label = label, color = iso2),
     hjust = 0,
-    nudge_x = 0.15,
+    nudge_x = 0.25,
     fontface = "bold",
     show.legend = FALSE
   ) +
   scale_color_manual(values = plot_colors) +
-  scale_x_continuous(breaks = seq(2000, 2024, 4), limits = c(2000, 2024.5)) +
-  scale_y_continuous(limits = c(0, NA), labels = label_number(suffix = "T")) +
+  scale_x_continuous(breaks = seq(2000, 2024, 4), limits = c(2000, 2025.5)) +
+  scale_y_continuous(limits = c(0, NA), labels = label_dollar()) +
   labs(
-    title = "China narrowed the gap with the US",
-    subtitle = "GDP, constant 2015 US dollars",
+    title = "Ireland spiked toward the EU's richest",
+    subtitle = "GDP per capita, constant 2015 US dollars",
     caption = "Source: The World Bank"
   ) +
   theme_minimal(base_size = 12) +
@@ -359,8 +413,10 @@ country_panel |>
     panel.background = element_rect(fill = "#f7f8f3", color = NA),
     panel.grid.minor = element_blank(),
     plot.title = element_text(face = "bold"),
-    plot.caption = element_text(color = "#6b7280")
-  )
+    plot.caption = element_text(color = "#6b7280"),
+    plot.margin = margin(5.5, 70, 5.5, 5.5)
+  ) +
+  coord_cartesian(clip = "off")
 ```
 
 
