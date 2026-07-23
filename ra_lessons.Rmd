@@ -16,10 +16,10 @@ knitr::opts_chunk$set(message = FALSE, warning = FALSE)
 
 this wouldnt speak much about measurement issues in datasets
 
-```{r}
+```{r load-packages}
 pacman::p_load(
   dplyr, labelled, sjlabelled, tidyr, ggplot2, scales, sf,
-  here, readr
+  here, readr, dtplyr, duckdb, DBI
   )
 
 options(scipen = 999)
@@ -29,24 +29,23 @@ options(scipen = 999)
 
 ## style and speed
 
-- I mainly used dplyr, so while data.table is faster, i find the syntax of it a bit less intuitive and prefer to work with the more piped structure of dplyr
-- for faster processes while still using dplyr syntax, dtplyr is very useful. duckdb is way faster and presents another option that is useful for some cases
+I mainly used `dplyr`, due to a combination of preference for its syntax and the piped structure, and being used to it. 
+
+
+```{r make-style-example}
+example_df <- tibble::tibble(
+  iso2 = c("US", "US", "CN", "CN"),
+  gdp_t = c(25, 26, 17, 18)
+)
+```
+
 - highly recommend to examine updates to the dplyr package (and in general, to packages that are used often). 
 - the new pipe (|>) is nicer and cleaner than the old magrittr `%>%` pipe
 
 see the difference between coding styles:
 
-```{r}
-style_df <- tibble::tibble(
-  iso2 = c("US", "US", "CN", "CN"),
-  gdp_t = c(25, 26, 17, 18)
-)
-
-style_df
-```
-
-```{r}
-style_df %>% 
+```{r old-pipe-style, results='hide', class.source='fold-show'}
+example_df %>% 
   group_by(iso2) %>%
   summarise(
     avg_gdp = mean(gdp_t)
@@ -54,8 +53,8 @@ style_df %>%
   ungroup()
 ```
 
-```{r}
-style_df |> 
+```{r native-pipe-style, results='hide', class.source='fold-show'}
+example_df |> 
   summarise(
     avg_gdp = mean(gdp_t),
     .by = iso2
@@ -63,57 +62,122 @@ style_df |>
 ```
 Decide for yourself but I much prefer the latter.
 
+`data.table` is faster, but for most processes the marginal improvement is rather small. 
+
+For heavier processes, one can use `dtplyr`. For smaller processes, it seems better to use `dplyr` regularly, as the setup costs may take longer than the actual calculation.
+
+```{r benchmark-dplyr-dtplyr}
+set.seed(23072026)
+
+speed_df <- tibble::tibble(
+  iso2 = sample(sprintf("C%03d", 1:200), 3000000, replace = TRUE),
+  year = sample(2000:2024, 3000000, replace = TRUE),
+  gdp_t = runif(3000000, 1, 100),
+  pop_m = runif(3000000, 1, 1500)
+)
+
+dplyr_elapsed <- system.time({
+  dplyr_result <- speed_df |>
+    mutate(
+      gdp_pc = gdp_t * 1000000 / pop_m,
+      large = gdp_t > 50
+    ) |>
+    filter(large, year >= 2010) |>
+    summarise(
+      avg_gdp_pc = mean(gdp_pc),
+      total_gdp = sum(gdp_t),
+      n = n(),
+      .by = c(iso2, year)
+      )
+})[["elapsed"]]
+
+cat("dplyr elapsed:", round(dplyr_elapsed, 3), "seconds\n")
+
+dtplyr_elapsed <- system.time({
+  dtplyr_result <- speed_df |>
+    lazy_dt() |>
+    mutate(
+      gdp_pc = gdp_t * 1000000 / pop_m,
+      large = gdp_t > 50
+    ) |>
+    filter(large, year >= 2010) |>
+    summarise(
+      avg_gdp_pc = mean(gdp_pc),
+      total_gdp = sum(gdp_t),
+      n = n(),
+      .by = c(iso2, year)
+      ) |>
+    as_tibble()
+})[["elapsed"]]
+
+cat("dtplyr elapsed:", round(dtplyr_elapsed, 3), "seconds\n")
+```
+
+`duckdb` is another fast option, especially when the data is too large to comfortably keep in memory. It requires SQL syntax, however.
+
+```{r benchmark-duckdb}
+con <- dbConnect(duckdb())
+duckdb_register(con, "speed_df", speed_df)
+
+duckdb_elapsed <- system.time({
+  duckdb_result <- dbGetQuery(
+    con,
+    "
+    SELECT
+      iso2,
+      year,
+      AVG(gdp_t * 1000000 / pop_m) AS avg_gdp_pc,
+      SUM(gdp_t) AS total_gdp,
+      COUNT(*) AS n
+    FROM speed_df
+    WHERE gdp_t > 50
+      AND year >= 2010
+    GROUP BY iso2, year
+    "
+  )
+})[["elapsed"]]
+
+cat("duckdb elapsed:", round(duckdb_elapsed, 3), "seconds\n")
+
+dbDisconnect(con, shutdown = TRUE)
+```
+
 ## functions with the same names 
 
-- there are some functions with identical names across packages. this is a source of some bugs and odd behaviour that is generally hard to understand or detect. 'lag' is a nice example of that. its base version from stats::lag is quite bad as it doesn't actually lag the variables; dplyr::lag (or data.table::shift(type = "lag") are much more reliable. raster::select might cause the code to break if dplyr::select is not mentioned explicitly (but here at least there wouldn't be a mysterious bug, unlike the 'lag' case). another example is 'copy\_labels', that exists in both 'sjlabelled' and 'labelled'. I once didn't examine the exact meaning of the packages, and incorrectly assumed that they would just copy the labels per variables while not changing the data.
-But note that they do change the values and fill in values for the data with NA, but in an opposite direction depending on the order of the data, as the functions work in this way
-```r
-    sjlabelled::copy_labels(new, old)
-    labelled::copy_labels(old, new)
-    # to get them to be 'equivalent', one can e.g., use
-    labelled::copy_labels_from()
-    or set the exact parameters like labelled::copy_labels(to=new, from=old) 
-```
-example:
+Some R functions from different packages have the identical names. This is the source of some bugs and unexpected behaviour, that is sometimes quite hard to detect. 
+The `lag` function is a nice example of that. Its base version, `stats::lag`, is quite problematic as it doesn't actually lag the variables. `dplyr::lag` (or `data.table::shift(type = "lag")`) are much preferable. However, not specifying the package for this function may cause the use of `stats::lag`, and copy the values rather than lag them.
 
-`old_labels` is a labelled version of the data, and `new_data` is a newer version of the data that we want to copy the labels into.
-
-```{r include=FALSE}
-old_labels <- tibble::tibble(
-  x = labelled(c(1, 2), labels = c(no = 1, yes = 2)),
-  y = labelled(c(10, 20), labels = c(low = 10, high = 20))
+```{r compare-lag-functions}
+lag_example <- tibble::tibble(
+  year = 2020:2022,
+  gdp = c(100, 120, 140)
 )
 
-new_data <- tibble::tibble(
-  x = c(NA_real_, 99),
-  y = c(30, 40)
-)
+lag_example |>
+  mutate(
+    `dplyr::lag` = dplyr::lag(gdp),
+    `stats::lag` = as.numeric(stats::lag(gdp))
+  )
 ```
 
-```{r}
-old_labels
-new_data
-```
+Similarly, if the code uses `select` without specifying that it should call `dplyr::select`, while `raster` is called, the code might break given the existence of `raster::select`. Here, at least, there wouldn't be a mysterious bug, unlike the `lag` case). 
 
-```{r}
-labelled::copy_labels(old_labels, new_data)
-sjlabelled::copy_labels(old_labels, new_data)
-```
+Another example is `copy_labels`, which exists in both `sjlabelled` and `labelled`. The two versions do not use the same argument order, and they may also change values while copying labels, so it is worth writing the package name explicitly and checking the documentation.
 
 # Country level analysis
 
 A lot of the analysis I have done was at the country level, or used countries as parent units. Thus, most of this text is going to use countries as example units, but here are some tips on dealing with country level data:
 
-## Country names
-Country names can be inconsistent between datasets. 'Ivory Coast' and 'Cote d'Ivoire' refer to the same country. While keeping the name can be useful for plots, tables and understanding the data, for joins it is much preferable to use country codes. ISO2 or ISO3 are great for that. Note, however, that even country codes may have some inconsistency, some examples -
-1) South Sudan's ISO3 is usually 'SSD', but I've seen some datasets where it was 'SDS' 
-2) Namibia's ISO2 is 'NA'. Depending on the function that reads the data, it may be read as NA
+## Country identifiers
+Country names are useful for plots and tables, but they are often inconsistent across datasets. For example, "Ivory Coast" and "Cote d'Ivoire" may refer to the same country. For joins, it is usually better to rely on ISO codes, while keeping the names as labels.
+
+Even country codes need a quick check. For example:
+1) South Sudan's ISO3 is usually "SSD", but some datasets may use "SDS"
+2) Namibia's ISO2 is "NA", which can be confused with a missing value if the data is read carelessly
 
 Normally the WDI includes data on aggregates (if you download directly with 'WDI::WDI(), use extra = TRUE')). For illustration, however, I have downloaded the data from the WDI website as csv. https://data.worldbank.org/indicator/SP.POP.TOTL and https://data.worldbank.org/indicator/NY.GDP.MKTP.KD
 
-```{r}
-selected_iso2 <- c("US", "CN", "EU")
-
+```{r build-country-panel}
 pop <- read_csv(here("data", "API_SP.POP.TOTL_DS2_en_csv_v2_33112.csv"), skip = 4) |>
   pivot_longer(
     cols = matches("^\\d{4}$"),
@@ -146,31 +210,34 @@ country_panel_all <- full_join(pop, gdp, by = c("iso3", "country_name", "year"))
     iso3,
     country_name,
     year,
-    gdp,
     gdp_b = round(gdp / 1e9, 5),
-    gdp_t = round(gdp / 1e12, 5),
-    pop
+    pop_m = round(pop / 1e6, 3)
   ) |>
   filter(year >= 2000) |>
   arrange(iso2, year)
 
-saveRDS(country_panel_all, here("data", "wdi_gdp_country_panel_all.rds"))
+head(country_panel_all)
 ```
 
-Now, this version does not already contain a column referring to whether a unit is an aggregate or not (the data actually exists in the metadata, but I'm not using it on purpose). There are many ways to deal with it, one (probably not the best one, but it highlights a potential problem) is using the 'countrycode' package. I converted all the ISO3s into ISO2, which leaves NAs at all the aggregate units in the newly created ISO2 column. However, if we're paying close attention, see that Kosovo also does not have ISO2 here.
+This WDI file also includes rows that are not countries, such as regions or income groups. One quick diagnostic is to inspect the ISO3 codes that failed to convert to ISO2. Most failed conversions are aggregates, but this check also catches real places that need manual handling, like Kosovo.
 
-```{r}
-aggregate_or_unmatched_names <- country_panel_all |> 
+```{r list-unmatched-countries}
+unmatched_iso3 <- country_panel_all |> 
   filter(is.na(iso2)) |> 
-  distinct(country_name) |> 
-  pull(country_name)
+  distinct(iso3, country_name) |> 
+  arrange(country_name)
 
-cat(paste(aggregate_or_unmatched_names, collapse = ", "))
+tibble::tibble(n_unmatched_iso3 = nrow(unmatched_iso3))
+
+kosovo_row <- which(unmatched_iso3$iso3 == "XKX")
+
+unmatched_iso3 |> 
+  slice(max(1, kosovo_row - 2):min(n(), kosovo_row + 2))
 ```
 
-Thus, I'd manually add the ISO3 for Kosovo (and the EU, as I want to use it).
+Thus, I'd manually add an ISO2 code for Kosovo. I also keep the EU as a custom aggregate because I want to use it later.
 
-```{r}
+```{r fix-country-codes}
 country_panel <- country_panel_all |> 
   mutate(
     iso2 = case_when(
@@ -194,26 +261,24 @@ In some datasets there may be aggregates (e.g., "Middle East"). In some datasets
 <!--     country_name = if_else(iso2 == "EU", "European Union", country_name) -->
 <!--   ) |> -->
 <!--   summarise( -->
-<!--     gdp = if (all(is.na(gdp))) NA_real_ else sum(gdp, na.rm = TRUE), -->
-<!--     gdp_b = round(gdp / 1e9, 1), -->
-<!--     gdp_t = round(gdp / 1e12, 1), -->
-<!--     pop = sum(pop, na.rm = TRUE), -->
+<!--     gdp_b = sum(gdp_b, na.rm = TRUE), -->
+<!--     pop_m = sum(pop_m, na.rm = TRUE), -->
 <!--     .by = c(iso2, country_name, year) -->
 <!--   ) -->
 <!-- ``` -->
 
 <!-- # eu_comparison <- eu_df |>  -->
 <!-- #   filter(iso2 == "EU") |>  -->
-<!-- #   select(year, eu_constructed_gdp_t = gdp_t, eu_constructed_pop = pop) |> -->
+<!-- #   select(year, eu_constructed_gdp_b = gdp_b, eu_constructed_pop_m = pop_m) |> -->
 <!-- #   left_join( -->
 <!-- #     country_panel_all |>  -->
 <!-- #       filter(iso3 == "EUU") |>  -->
-<!-- #       select(year, eu_wdi_gdp_t = gdp_t, eu_wdi_pop = pop), -->
+<!-- #       select(year, eu_wdi_gdp_b = gdp_b, eu_wdi_pop_m = pop_m), -->
 <!-- #     by = "year" -->
 <!-- #   ) |> -->
 <!-- #   mutate( -->
-<!-- #     gdp_diff_t = round(eu_constructed_gdp_t - eu_wdi_gdp_t, 2), -->
-<!-- #     pop_diff = eu_constructed_pop - eu_wdi_pop -->
+<!-- #     gdp_diff_b = round(eu_constructed_gdp_b - eu_wdi_gdp_b, 2), -->
+<!-- #     pop_diff_m = eu_constructed_pop_m - eu_wdi_pop_m -->
 <!-- #   ) -->
 <!-- #  -->
 <!-- # eu_comparison -->
@@ -227,17 +292,17 @@ Various geographical units of observations do not have consistent boundaries ove
 When working with country-level data, for example, pay attention to countries whose borders have changed in the period of analysis (or recently!). 'Sudan' might reflect the current state of Sudan, or also the values of South Sudan. Montenegro might be part of Yugoslavia, Serbia and Montenegro, or Montenegro; the same is true for Kosovo (despite not being mentioned in the name of 'Serbia and Montenegro'), although Kosovo might not even exist in certain datasets. Taiwan might be referred to in different ways, depending on the dataset.
 
 This, for example, looks rather fine - there are no obvious spikes in the data around the year of independence:
-```{r}
+```{r plot-sudan-south-sudan}
 country_panel |>
   filter(iso2 %in% c("SD", "SS"), year %in% 2006:2014) |>
   ggplot() + 
-  geom_line(aes(x = year, y = pop, group = country_name, color = country_name))
+  geom_line(aes(x = year, y = pop_m, group = country_name, color = country_name))
 
 ```
 
 # NAs
 Assume that we have a dataset with some missing values:
-```{r}
+```{r make-na-example}
 na_df <- country_panel |>
   filter(
     iso2 %in% c("CU", "ER", "BO"), 
@@ -254,8 +319,8 @@ na_df
 We want to aggregate that data. The main options are 1) na.rm = TRUE, which removes the NAs before calculating, such that sum(df$x, na.rm = TRUE) would still return a value. For sums this can look like treating NA as 0, and if all values are NA it returns 0, but for means it also changes the denominator; 2) na.rm = FALSE, which forces the aggregation to have NA if any of the values is NA 
 
 Especially if we use a loop or across to aggregate over several variables or units, it can be a problem
-Say that we want to sum gdp for each of those three countries in this period.  
-```{r}
+Say that we want to sum GDP, in billions, for each of those three countries in this period.  
+```{r compare-na-sums}
 na_df_long <- na_df |> 
   pivot_longer(
     -year,
@@ -306,7 +371,7 @@ so the table lets us see the three choices together: when we use na.rm = FALSE, 
 There are much better guides than whatever I'll write, but some important things - 
 a) axis titles are almost always unnecessary, unreadable, ugly and distracting (especially y axis titles). The same information can usually be conveyed using the main plot title
 
-```{r}
+```{r plot-gdp-pc-raw}
 eu27_countries <- c(
   "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR",
   "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL",
@@ -321,7 +386,7 @@ plot_df <- country_panel |>
     year <= 2024
   ) |> 
   mutate(
-    gdp_pc = gdp / pop,
+    gdp_pc = gdp_b * 1000 / pop_m,
     highlighted = if_else(iso2 %in% highlight_countries, iso2, "Other countries")
   )
 
@@ -332,7 +397,7 @@ plot_df |>
   scale_y_continuous(limits = c(0, NA), labels = label_dollar())
 ```
 Very minimal adjustments make it a lot cleaner:
-```{r}
+```{r plot-gdp-pc-clean}
 plot_df |> 
   ggplot() + 
   geom_line(aes(x = year, y = gdp_pc, color = iso2)) + 
@@ -343,8 +408,9 @@ plot_df |>
   labs(title = "GDP per capita across EU countries")
 ```
 
-the legend can also often be avoided by placing the labels directly near the lines. The plot can also benefit from clearer colours (that are more colour-blind friendly). Say that we want to focus on Ireland, Luxembourg, and Sweden
-```{r}
+The legend can also often be avoided by placing the labels directly near the lines. The plot can also benefit from clearer colours (that are more colour-blind friendly). Say that we want to focus on Ireland's rise from Sweden's level of GDP per capita to nearly Luxembourg's, then these could be higlighted with the other EU countries having grey :
+
+```{r plot-gdp-pc-highlighted}
 plot_colors <- c(
   "IE" = "#0072B2",
   "LU" = "#D55E00",
@@ -384,8 +450,9 @@ plot_df |>
   labs(title = "Ireland spiked toward the EU's richest")
 ```
 
-and a more final version could look something like this:
-```{r}
+Finally, a more polished version could use background colours, cleaner axis, using the actual names as labels and so on:
+
+```{r plot-gdp-pc-final}
 plot_df |> 
   ggplot(aes(x = year, y = gdp_pc, group = iso2)) + 
   geom_line(aes(color = highlighted), linewidth = 0.9, alpha = 0.8) + 
@@ -433,7 +500,7 @@ centroid is a popular solution, but it suffers from various drawbacks.
 - it is not necessarily inside the unit. think of units with weird shapes (vietnam), that are composed of many distinct geometries (multiple-island countries, like the philippines) or with holes inside (south africa). if we're calculating the distance of centroid of country x to that of y, and country y's centroid is inside that of x's, it's not ideal...
 - one solution for that would be to use `st_point_on_surface` from the sf package. it guarantees that the point would be on the surface of the unit, and generally is around its middle. however, for certain cases, it might still not capture something we're interested in. I was working with an admin unit that included a city in the mainland, and an island very far from the mainland. The island was larger, so `st_point_on_surface` has led to a point in the island. In some cases perhaps it's fine, but if we're interested in anything that involves population - then it really does not capture what we want
 
-```{r echo=FALSE}
+```{r plot-centroid-surface-points, echo=FALSE}
 normal_polygon <- st_polygon(list(
   matrix(
     c(
@@ -486,7 +553,7 @@ bind_rows(centroids, surface_points) |>
 
 - what about population-weighted centroid? we can use data like GHS-POP to do it (recommended to do it in GEE). However, 1) it might still be outside of the unit, 2) say that there are several population centres in different areas. the pop-weighted centroid is probably going to be between them, which might be good but it'll likely reflect a (relatively) remote point. which might be fine but not always!
 
-```{r echo=FALSE}
+```{r plot-population-centroid-points, echo=FALSE}
 population_unit <- st_sf(
   geometry = st_sfc(normal_polygon)
 )
@@ -585,7 +652,7 @@ ggplot() +
       "centroid" = "#D55E00",
       "point on surface" = "#0072B2",
       "population-weighted centroid" = "#009E73",
-      "highest population cell" = "#CC79A7"
+      "highest population cell" = "black"
     )
   ) +
   coord_sf(datum = NA, expand = TRUE) +
