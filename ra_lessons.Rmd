@@ -25,7 +25,7 @@ pacman::p_load(
 options(scipen = 999)
 ```
 
-# R
+# Working in R
 
 ## style and speed
 
@@ -164,6 +164,137 @@ Similarly, if the code uses `select` without specifying that it should call `dpl
 
 Another example is `copy_labels`, which exists in both `sjlabelled` and `labelled`. The two versions do not use the same argument order, and they may also change values while copying labels, so it is worth writing the package name explicitly and checking the documentation.
 
+# Data construction and cleaning
+
+## Joins
+
+- discuss key uniqueness before joining
+- discuss conflicting columns after a join, e.g., `country_name.x` and `country_name.y`
+- discuss adding suffixes or selecting away unnecessary columns before joining
+- discuss what happens to the rows under `left_join`, `inner_join`, etc
+- discuss one-to-one, many-to-one, and many-to-many joins
+- briefly mention that `full_join` and `right_join` also exist, but are needed less often
+
+Assume that we have those two datasets, and we want to add the GDP variable into the country-region data:
+
+```{r simple-country-join-example}
+country_gdp <- tibble::tibble(
+  iso3 = c("USA", "CHN", "IND"),
+  country_name = c("United States", "China", "India"),
+  gdp_b = c(23000, 18000, 3500)
+)
+
+country_regions <- tibble::tibble(
+  iso3 = c("USA", "CHN", "IND", "MEX"),
+  country_name = c("United States of America", "China", "India", "Mexico"),
+  region = c("North America", "East Asia", "South Asia", "Latin America")
+)
+
+country_gdp
+
+country_regions
+
+```
+
+```{r}
+
+joined_country_regions <- country_regions |>
+  left_join(country_gdp, join_by(iso3))
+
+joined_country_regions
+
+country_regions |>
+  inner_join(country_gdp, join_by(iso3))
+
+country_regions |>
+  left_join(country_gdp, join_by(country_name))
+
+country_regions |>
+  left_join(
+    country_gdp,
+    join_by(iso3),
+    suffix = c("_regions", "_gdp")
+  )
+
+country_regions |>
+  left_join(
+    country_gdp |> 
+      select(-country_name),
+    join_by(iso3)
+  )
+```
+
+Here, both `left_join` and `inner_join` can add GDP, but they do not keep the same rows: `left_join` keeps Mexico and leaves GDP as `NA`, while `inner_join` drops Mexico. `full_join` and `right_join` also exist, but I use them less often.
+
+In this example, joining by country name is problematic because the United States is written differently across the two datasets. The `country_name` columns also conflict after joining by `iso3`, so one option is to use suffixes and another is to drop the extra `country_name` column before joining.
+
+## Messages and quick checks
+
+- discuss adding messages after important data construction steps
+- discuss reporting how many units joined, did not join, or have missing values after a join
+- discuss reporting how many units were aggregated, how many rows were collapsed, or how many groups have missing values after `summarise`
+
+```{r join-messages, message=TRUE}
+joined_country_regions <- country_regions |>
+  left_join(
+    country_gdp |> 
+      select(-country_name),
+    join_by(iso3)
+  )
+
+unmatched_country_regions <- country_regions |>
+  filter(!iso3 %in% country_gdp$iso3)
+
+message(
+  n_distinct(country_regions$iso3) - nrow(unmatched_country_regions), " of ",
+  n_distinct(country_regions$iso3), " country-region units matched to GDP."
+)
+
+message(
+  nrow(unmatched_country_regions), " country-region units did not match to GDP."
+)
+
+message(
+  sum(is.na(joined_country_regions$gdp_b)), " rows have missing GDP after the join."
+)
+```
+
+## Aggregates
+
+In some datasets there may be aggregates (e.g., "Middle East" in a country-level dataset). In some datasets there are variables that refer to those, but not always, and the names of the 'aggregate' countries might be different across different datasets (e.g., in two different datasets of FAOSTAT, there is in one dataset (https://www.fao.org/faostat/en/#data/FBSH) an aggregated region of 'Low Income Food Deficit Countries', but in another (https://www.fao.org/faostat/en/#data/QCL) this appears as 'Low Income Food Deficit Countries (LIFDCs)'. Given that there is not always an ISO2/3 equivalent for each aggregate, one needs to pay attention to those cases. 
+
+<!-- What if we want to aggregate multiple rows. I've removed before the EU as an aggregate, but let's assume that we'd want to construct it from scratch: -->
+<!-- ```{r} -->
+<!-- eu_df <- country_panel |>  -->
+<!--   mutate( -->
+<!--     iso2 = if_else(iso2 %in% eu_iso2, "EU", iso2), -->
+<!--     country_name = if_else(iso2 == "EU", "European Union", country_name) -->
+<!--   ) |> -->
+<!--   summarise( -->
+<!--     gdp_b = sum(gdp_b, na.rm = TRUE), -->
+<!--     pop_m = sum(pop_m, na.rm = TRUE), -->
+<!--     .by = c(iso2, country_name, year) -->
+<!--   ) -->
+<!-- ``` -->
+
+<!-- # eu_comparison <- eu_df |>  -->
+<!-- #   filter(iso2 == "EU") |>  -->
+<!-- #   select(year, eu_constructed_gdp_b = gdp_b, eu_constructed_pop_m = pop_m) |> -->
+<!-- #   left_join( -->
+<!-- #     country_panel_all |>  -->
+<!-- #       filter(iso3 == "EUU") |>  -->
+<!-- #       select(year, eu_wdi_gdp_b = gdp_b, eu_wdi_pop_m = pop_m), -->
+<!-- #     by = "year" -->
+<!-- #   ) |> -->
+<!-- #   mutate( -->
+<!-- #     gdp_diff_b = round(eu_constructed_gdp_b - eu_wdi_gdp_b, 2), -->
+<!-- #     pop_diff_m = eu_constructed_pop_m - eu_wdi_pop_m -->
+<!-- #   ) -->
+<!-- #  -->
+<!-- # eu_comparison -->
+
+<!-- Importantly for cases like this, ideally we'd want to verify that the values make sense compared to some reference data. For instance, I would try to find data on the aggregate (EU, in this case) from another source - IMF, Eurostat, etc, asking an AI whether it looks plausible etc.  -->
+
 # Country level analysis
 
 A lot of the analysis I have done was at the country level, or used countries as parent units. Thus, most of this text is going to use countries as example units, but here are some tips on dealing with country level data:
@@ -249,43 +380,6 @@ country_panel <- country_panel_all |>
   filter(!is.na(iso2))
 ```
 
-## country aggregates
-
-In some datasets there may be aggregates (e.g., "Middle East"). In some datasets there are variables that refer to those, but not always, and the names of the 'aggregate' countries might be different across different datasets (e.g., in two different datasets of FAOSTAT, there is in one dataset (https://www.fao.org/faostat/en/#data/FBSH) an aggregated region of 'Low Income Food Deficit Countries', but in another (https://www.fao.org/faostat/en/#data/QCL) this appears as 'Low Income Food Deficit Countries (LIFDCs)'. Given that there is not always an ISO2/3 equivalent for each aggregate, one needs to pay attention to those cases. 
-
-<!-- What if we want to aggregate multiple rows. I've removed before the EU as an aggregate, but let's assume that we'd want to construct it from scratch: -->
-<!-- ```{r} -->
-<!-- eu_df <- country_panel |>  -->
-<!--   mutate( -->
-<!--     iso2 = if_else(iso2 %in% eu_iso2, "EU", iso2), -->
-<!--     country_name = if_else(iso2 == "EU", "European Union", country_name) -->
-<!--   ) |> -->
-<!--   summarise( -->
-<!--     gdp_b = sum(gdp_b, na.rm = TRUE), -->
-<!--     pop_m = sum(pop_m, na.rm = TRUE), -->
-<!--     .by = c(iso2, country_name, year) -->
-<!--   ) -->
-<!-- ``` -->
-
-<!-- # eu_comparison <- eu_df |>  -->
-<!-- #   filter(iso2 == "EU") |>  -->
-<!-- #   select(year, eu_constructed_gdp_b = gdp_b, eu_constructed_pop_m = pop_m) |> -->
-<!-- #   left_join( -->
-<!-- #     country_panel_all |>  -->
-<!-- #       filter(iso3 == "EUU") |>  -->
-<!-- #       select(year, eu_wdi_gdp_b = gdp_b, eu_wdi_pop_m = pop_m), -->
-<!-- #     by = "year" -->
-<!-- #   ) |> -->
-<!-- #   mutate( -->
-<!-- #     gdp_diff_b = round(eu_constructed_gdp_b - eu_wdi_gdp_b, 2), -->
-<!-- #     pop_diff_m = eu_constructed_pop_m - eu_wdi_pop_m -->
-<!-- #   ) -->
-<!-- #  -->
-<!-- # eu_comparison -->
-
-<!-- Importantly for cases like this, ideally we'd want to verify that the values make sense compared to some reference data. For instance, I would try to find data on the aggregate (EU, in this case) from another source - IMF, Eurostat, etc, asking an AI whether it looks plausible etc.  -->
-
-
 ## Geographies consistency over time
 
 Various geographical units of observations do not have consistent boundaries over time. Countries change their borders, gain independence or split; admin units sometimes change have changed their borders. Different datasets treat those changes differently - perhaps a value in a given year refers to the current border or the old one. 
@@ -300,7 +394,7 @@ country_panel |>
 
 ```
 
-# NAs
+# Missing values
 Assume that we have a dataset with some missing values:
 ```{r make-na-example}
 na_df <- country_panel |>
@@ -493,6 +587,10 @@ plot_df |>
 - gpkg is recommended over shapefile 
 - gee is great, but for some stuff r does the job done - gee is in my opinion mainly advantageous if the data is already there, if certain operations (geometric operations for example) are required, or heavier processes (although with the new limits, less so). 
 
+### spatial matching
+
+discuss here how to intersect between spatial data and some of the relevant considerations (whether technical - st_intersection vs st_nearest_feature, but also raster vs vector, what do to in cases of multiple intersections etc)
+
 ### polygons vs points
 sometimes we may want to work with single points in a given unit, rather than the full polygon. that's especially the case if 1) the analysis is very heavy (e.g., calculating road path from unit x to y); 2) we are interested in the role of specific areas within the unit (e.g., the main city), 3) fill
 if we chooes to use points, how do we select the point? it depends obviously on what we want to achieve.
@@ -670,12 +768,34 @@ ggplot() +
 ### finding a 'representative' category
 there are various spatial datasets that might involve finding some balance between various categories. mines datasets, for example, sometimes have each individual mine as a row, or would have a value of 'suitability for a given commodity' per cell. depends on what we want to have, we might want to aggregate the data per unit. should we sum the number of distinct mines? use the commodity with the highest value of suitability? no obvious answer here but worth thinking about those...
 
-# empirical
+# Analysis
 log() of low numbers is pretty useless. not unknown, but worth paying attention to
 
 ## shift share
 
 # Debugging and validating results
+
+- row counts before and after each important step
+- duplicate keys
+- unmatched observations
+- impossible values
+- missingness summaries
+- graphs
+- edge cases
+- compare aggregates to an external source
+- inspect examples rather than only summary statistics
+
+# constructing workflows
+
+- raw, intermediate, and output data
+- script order
+- naming conventions
+- expensive steps and cached outputs
+- logs
+- seeds
+- final checklist before sending results
+
+# AI use
 
 # Specific datasets
 
