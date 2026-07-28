@@ -583,9 +583,25 @@ plot_df |>
 
 # Spatial Analysis
 
-- sf is great
-- gpkg is recommended over shapefile 
-- gee is great, but for some stuff r does the job done - gee is in my opinion mainly advantageous if the data is already there, if certain operations (geometric operations for example) are required, or heavier processes (although with the new limits, less so). 
+A note (that I quite often ignore) - gpkg is recommended over shapefile [why]
+
+### What to use
+
+For me, there are mainly three types of tools that are useful in spatial analysis.
+
+| Type | Examples | Main advantages | Main drawbacks |
+|---|---|---|---|
+| Programming languages | R with `sf` and `terra`; Python with `geopandas`, `rasterio`, `xarray`, etc. | Reproducible workflows; easy to combine spatial work with data cleaning, modeling, and plotting; good for local vector/raster operations | Local storage and memory can become a problem; worse for some visual validation |
+| GIS software | QGIS, ArcGIS | Inspection, validation, manual exploration, and cartographic output | requires local storage; less convenient for some analysis workflows |
+| Google Earth Engine | GEE Code Editor, GEE Python API | Hosted data catalogs; convenient raster and remote-sensing operations; interactive map checking; avoids many local storage problems | Less intuitive coding and debugging; quotas and server-side limits; less convenient for some reproducible project workflows |
+
+**Programming languages** - can do most of the work well. Running things is rather fast for most cases and visualizations (e.g., `ggplot2::geom_sf()`) are decent. Mainly, they are very convenient when spatial work is a part of a larger data construction or analysis workflow. 
+
+**GIS software** - ArcGIS is powerful but not free; QGIS is very good for visualizations and debugging or validating data (e.g., examine whether a spatial join worked properly or matched the wrong places). It is also possible to program there, but I find the programming less convenient than `sf` in R (decide for yourself, though; perhaps starting out with QGIS is easier), and it creates an additional layer of workflow (save the data, load it elsewhere, etc.). I personally like working with R though, especially with AI agents helping write and debug code. 
+
+**GEE** - useful mainly, in my opinion, when the data already exists in the Earth Engine data catalog (https://developers.google.com/earth-engine/datasets) or the GEE community catalog (https://gee-community-catalog.org/). For example, using Hansen forest loss data or built-up data from GHSL is easier when one can avoid downloading and storing the data, and instead we'd run the relevant operations there. It can also be advantageous for raster or remote-sensing operations, such as filtering large image collections by date/cloud cover/location, combining multiple images, and using reducers over space or time. However, this is less of a reason to use GEE for every heavy spatial process now that there are quotas for noncommercial users. It is also good for validation and checking layers on a map. The main drawback of GEE, beyond quotas, is the coding experience: the Code Editor uses the Earth Engine JavaScript API, many objects are server-side, and errors can be opaque. GEE now has a Gemini assistant in the Code Editor (which I haven't tried yet), which requires a Gemini API key, so it is not necessarily unlimited/free. In terms of workflows, it can be annoying, although it's possible to use the Python API to keep all the code in a single project with other R/Python/Stata codes.
+
+When unsure which tool to use, AIs would probably be useful to help you judge, and now the costs of writing a sample code in R and examining its efficiency are so low that it's probably worth starting from it.
 
 ### spatial matching
 
@@ -799,7 +815,13 @@ log() of low numbers is pretty useless. not unknown, but worth paying attention 
 
 # Specific datasets
 
-## WDPA (protected areas)
+## WDPA (World Database on Protected Areas)
+
+**Points** - The database includes protected areas (PAs) represented both as polygons and as points. For polygons, the boundaries of the PAs are available directly. Points are more ambiguous, as they can represent point-like features, or refer to larger protected areas for which the shape is unknown. The `REP_AREA` field can be used to approximate the size of these point records, but the point location is not necessarily the centroid of the area, and the shape of the area is unknown. Therefore, buffering points by their reported area may be useful as an approximation, but it is unlikely to recover the true shape of the PA.
+
+**Overlaps** - When intersecting WDPA with other spatial data, for example to estimate the share of an area covered by PAs, need to account for overlapping of PAs. A given location can be covered by multiple PAs, so simply summing areas across records can overstate coverage. Thus, protected-area geometries may need to be unioned before calculating total covered area (perhaps by category, depending on the goal).
+
+**Status year** - The time variable in WDPA is `STATUS_YR`, which records the last year of status change. This usually refers to the legal designation as a protected area. In checks against South African protected-area data from the late 1990s onward, most protected areas did not appear to change status after their initial designation during the observed period. This suggests that `STATUS_YR` can often be informative about designation timing, but it should still be used cautiously, especially for cases involving expansions, reclassification, proposed or established areas, and loss of status.
 
 ## IPUMS
 
