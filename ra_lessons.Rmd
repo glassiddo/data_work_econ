@@ -145,7 +145,7 @@ dbDisconnect(con, shutdown = TRUE)
 ## functions with the same names 
 
 Some R functions from different packages have the identical names. This is the source of some bugs and unexpected behaviour, that is sometimes quite hard to detect. 
-The `lag` function is a nice example of that. Its base version, `stats::lag`, is quite problematic as it doesn't actually lag the variables. `dplyr::lag` (or `data.table::shift(type = "lag")`) are much preferable. However, not specifying the package for this function may cause the use of `stats::lag`, and copy the values rather than lag them.
+The `lag` function is a nice example of that. For ordinary vectors/data frames, `stats::lag` can lead to bugs but might be the default; meanwhile, `dplyr::lag` (or `data.table::shift(type = "lag")`) is clearer and more reliable.
 
 ```{r compare-lag-functions}
 lag_example <- tibble::tibble(
@@ -168,12 +168,31 @@ Another example is `copy_labels`, which exists in both `sjlabelled` and `labelle
 
 ## Joins
 
-- discuss key uniqueness before joining
-- discuss conflicting columns after a join, e.g., `country_name.x` and `country_name.y`
-- discuss adding suffixes or selecting away unnecessary columns before joining
-- discuss what happens to the rows under `left_join`, `inner_join`, etc
-- discuss one-to-one, many-to-one, and many-to-many joins
-- briefly mention that `full_join` and `right_join` also exist, but are needed less often
+Quite often we want to join datasets, using one or more common keys. The main questions are which rows should stay, how to treat units that do not match, whether the key is actually unique, whether the keys are written consistently across datasets, and what to do when both datasets contain columns with the same name.
+
+There are four common types of joins:
+
+| Join | What it keeps | When to use |
+|---|---|---|
+| `left_join` | all rows from the first dataset | adding variables to a main dataset |
+| `inner_join` | only rows that match in both datasets | keeping only units that exist in both sources |
+| `full_join` | all rows from both datasets | checking coverage across sources, less common |
+| `right_join` | all rows from the second dataset | same idea as `left_join`, but less convenient |
+
+I usually like to have a "master" dataset with the units that are used for the final analysis, and then `left_join` other datasets into it. During data construction, `inner_join` and `full_join` can also be useful at times. 
+
+Another consideration is the relationship between the keys:
+
+| Relationship | Meaning | Example |
+|---|---|---|
+| one-to-one | each key appears once in both datasets | one row per country in both datasets |
+| many-to-one | many rows in the main data match one row in the added data | country-year data joined to one region per country |
+| one-to-many | one row in the main data matches many rows in the added data | one country joined to several yearly rows |
+| many-to-many | keys repeat on both sides | usually risky unless explicitly intended |
+
+It is worth checking what the key actually mean. Sometimes it should be one row per country-year, but in practice there are duplicates, aggregates, or several rows for the same unit. The default in `dplyr` is  `relationship = NULL` which does not enforce a relationship, but does give a warning for many-to-many join that was not stated as such. If we know what the relationship should be, it can be useful to state it explicitly, for example `relationship = "many-to-one"`, so the code fails when the data do not match the assumption.
+
+Another common issue is conflicting columns. If both datasets have `country` and `country_name`, for example, and we join on `country` only, then R may create columns such as `country_name.x` and `country_name.y`. That is sometimes useful for checking differences across sources, but usually it is cleaner to either use explicit suffixes or select away the unnecessary version before joining.
 
 Assume that we have those two datasets, and we want to add the GDP variable into the country-region data:
 
@@ -262,6 +281,8 @@ message(
 ## Aggregates
 
 In some datasets there may be aggregates (e.g., "Middle East" in a country-level dataset). In some datasets there are variables that refer to those, but not always, and the names of the 'aggregate' countries might be different across different datasets (e.g., in two different datasets of FAOSTAT, there is in one dataset (https://www.fao.org/faostat/en/#data/FBSH) an aggregated region of 'Low Income Food Deficit Countries', but in another (https://www.fao.org/faostat/en/#data/QCL) this appears as 'Low Income Food Deficit Countries (LIFDCs)'. Given that there is not always an ISO2/3 equivalent for each aggregate, one needs to pay attention to those cases. 
+
+<!-- To add: perhaps turn this into a short checklist: identify aggregate rows; decide whether to keep, drop, or reconstruct them; document the choice; and compare constructed aggregates to a reference source when possible. -->
 
 <!-- What if we want to aggregate multiple rows. I've removed before the EU as an aggregate, but let's assume that we'd want to construct it from scratch: -->
 <!-- ```{r} -->
@@ -384,6 +405,8 @@ country_panel <- country_panel_all |>
 
 Various geographical units of observations do not have consistent boundaries over time. Countries change their borders, gain independence or split; admin units sometimes change have changed their borders. Different datasets treat those changes differently - perhaps a value in a given year refers to the current border or the old one. 
 When working with country-level data, for example, pay attention to countries whose borders have changed in the period of analysis (or recently!). 'Sudan' might reflect the current state of Sudan, or also the values of South Sudan. Montenegro might be part of Yugoslavia, Serbia and Montenegro, or Montenegro; the same is true for Kosovo (despite not being mentioned in the name of 'Serbia and Montenegro'), although Kosovo might not even exist in certain datasets. Taiwan might be referred to in different ways, depending on the dataset.
+
+<!-- To add: perhaps make this a checklist too: which boundaries does the dataset use; are units historical or current; were any units split/merged during the period; are successor states treated consistently; and do plots around the transition years reveal suspicious jumps. -->
 
 This, for example, looks rather fine - there are no obvious spikes in the data around the year of independence:
 ```{r plot-sudan-south-sudan}
@@ -580,6 +603,8 @@ plot_df |>
   coord_cartesian(clip = "off")
 ```
 
+Another useful AI trick is to ask it to follow a specific visualization guide rather than asking for a "better plot" in general. For example, one could ask for suggestions inspired by the *Financial Times* visual vocabulary, the Urban Institute data visualization style guide, or the Datawrapper/Flourish style of direct labeling and restrained annotation.
+
 
 # Spatial Analysis
 
@@ -602,6 +627,12 @@ For me, there are mainly three types of tools that are useful in spatial analysi
 **GEE** - useful mainly, in my opinion, when the data already exists in the Earth Engine data catalog (https://developers.google.com/earth-engine/datasets) or the GEE community catalog (https://gee-community-catalog.org/). For example, using Hansen forest loss data or built-up data from GHSL is easier when one can avoid downloading and storing the data, and instead we'd run the relevant operations there. It can also be advantageous for raster or remote-sensing operations, such as filtering large image collections by date/cloud cover/location, combining multiple images, and using reducers over space or time. However, this is less of a reason to use GEE for every heavy spatial process now that there are quotas for noncommercial users. It is also good for validation and checking layers on a map. The main drawback of GEE, beyond quotas, is the coding experience: the Code Editor uses the Earth Engine JavaScript API, many objects are server-side, and errors can be opaque. GEE now has a Gemini assistant in the Code Editor (which I haven't tried yet), which requires a Gemini API key, so it is not necessarily unlimited/free. In terms of workflows, it can be annoying, although it's possible to use the Python API to keep all the code in a single project with other R/Python/Stata codes.
 
 When unsure which tool to use, AIs would probably be useful to help you judge, and now the costs of writing a sample code in R and examining its efficiency are so low that it's probably worth starting from it.
+
+### Recommendations for working with GEE
+
+If there is one set of units that will be used across multiple scripts, I would usually create a master feature collection and call it at the start of each script, for example `var worldUnits = ee.FeatureCollection('projects/ee-your_project/assets/worldUnits');`. Then, we can have a master script that loads the unit file and then calls separate modules.
+
+I would pay attention to boundary datasets that AIs tend to suggest, such as `FAO/GAUL/2015/level0`. They can be useful, but if we later group by ISO3 or compare to country-level data, some territories or administrative units may need to be merged first. In those cases it can be better to have a separate GEE script that cleans the boundary file, matches names (e.g., to ISO3), merges territories that should belong to the same unit, and exports the result as a reusable GEE asset. Then the analysis scripts can call that asset.
 
 ### spatial matching
 
@@ -803,15 +834,61 @@ log() of low numbers is pretty useless. not unknown, but worth paying attention 
 
 # constructing workflows
 
-- raw, intermediate, and output data
-- script order
-- naming conventions
-- expensive steps and cached outputs
-- logs
-- seeds
-- final checklist before sending results
+I like organising both code and data in raw, intermediate/build, and final/output folders. raw data should usually be kept as close as possible to the original files, intermediate data should be the products of construction steps, and final/output data should be the version that is actually used for analysis, tables, or figures. This makes it easier to know what can be recreated and what should not be manually edited.
+
+For code, I usually prefer numbered scripts or folders when there is a logical order, for example `01_import`, `02_clean`, `03_construct`, `04_analysis`. 
+If some steps are expensive, it is often worth saving intermediate outputs and reusing them, but I would name them clearly and avoid keeping several unexplained versions of the same object.
+
+Version control (usually git) is extremely useful. In projects with many authors, it can be useful to deal with conflicts; but even for a project that only you work on (or just you update the git) it is recommended, for tracking changes over time and reverting them more easily. For (especially heavy) data files, outputs that are repeatedly generated with different names (e.g., results_\{date\}) or private files, should go in `.gitignore` and not be tracked. 
+
+For reproducibility, I would keep the seed discussion near the code that actually uses randomness. `set.seed(123)` is deterministic, like any other fixed seed; it is not more random because the number is familiar. If there is no reason to use a specific seed, one option is to randomly generate a seed once, record it, and then keep using that same seed throughout the project.
+
+Before sending results, I would at least rerun the relevant scripts from a clean session and check the main outputs: row counts, duplicate keys, unmatched observations, summary statistics, missing values, and zeros where zeros may indicate a construction problem.
+
+## Handoff notes
+
+<!-- To add later. -->
+
+## Definitions and units
+
+<!-- To add later. -->
+
+## Assumptions and judgment calls
+
+<!-- To add later. -->
 
 # AI use
+
+This would probably change quite a bit soon, but the setup that I like now for working with AI agents is to separate reusable preferences from project-specific context. One possible structure is:
+
+```text
+ai_instructions/
+  general/
+    coding_style.md
+    data_checks.md
+    writing_style.md
+  project/
+    context.md
+    pipeline.md
+    datasets.md
+```
+
+The general files can include coding conventions, for example using `|>` rather than `%>%`, and recurring data-construction checks, such as looking for missing values after merges or joins that multiply rows. The project files can describe the question, the main unit of observation, the code structure, and the intended order of the data pipeline. This does use context, so I would not overdo it for small tasks, but for longer projects it can save repeated explanations and reduce mistakes. If there are project-specific coding conventions, I would usually add them as short additions to the general convention rather than copying the whole thing again.
+
+There are also many good skills online, so there is probably no need to create many new ones except for specific cases. I like using things such as humanizer and deep research, and it can be useful to take an existing skill and adjust it to your preferences. For example, my coding convention skill is edited from https://rworks.dev/posts/claude-skills-for-r-users/.
+
+For tasks that are not obvious, I prefer to start in plan mode or ask the AI to restate the task before implementing. Sometimes I ask it to write the prompt back to me, then I edit the prompt and use it in a new chat. This can help avoid very long chats and makes unclear assumptions more visible. It is also useful to ask the AI to interview you when there are missing choices. For example:
+
+```text
+Bad: fix this merge
+
+Better: use the project context and data-check instructions, fix the country-year merge, and report duplicate keys, unmatched rows, and any row-count changes
+```
+
+### AI and validation
+
+AI is useful for writing code, explaining unfamiliar packages, and finding possible bugs, but plausible code can still do the wrong thing. I would ask it to add messages and checks, summarize what changed, inspect examples rather than only summary statistics, and compare important constructed variables to an external source when possible.
+
 
 # Specific datasets
 
