@@ -27,6 +27,72 @@ options(scipen = 999)
 
 maybe say something about whether the code should be aimed at humans or ai - recommend something that is at least readable and debuggable by humans, even if not the cleanest. maybe use some example of a way that ai would write a code 'efficiently' vs humans - perhaps loop is a good example? or even just the number of messages etc
 
+# Constructing workflows
+
+I prefer working inside an R project, which makes relative paths more stable. Functions like `here::here()` are useful for referring to files from the project root, instead of relying on whatever folder happens to be active.
+
+A simple project structure is usually enough:
+
+<table class="mini-table">
+<thead>
+<tr><th>Folder or file</th><th>What goes there</th><th>Rule of thumb</th></tr>
+</thead>
+<tbody>
+<tr>
+<td><code>data/raw/</code></td>
+<td>Original downloads, exports, shapefiles, survey files.</td>
+<td>Keep close to the original. Do not edit by hand.</td>
+</tr>
+<tr>
+<td><code>data/intermediate/</code></td>
+<td>Cleaned or partially constructed files.</td>
+<td>Useful when a step is slow or shared across scripts.</td>
+</tr>
+<tr>
+<td><code>data/final/</code></td>
+<td>Analysis-ready datasets.</td>
+<td>These should be recreated from scripts, not patched manually.</td>
+</tr>
+<tr>
+<td><code>R/</code> or numbered scripts</td>
+<td><code>01_import</code>, <code>02_clean</code>, <code>03_construct</code>, <code>04_analysis</code>.</td>
+<td>Use names that show the order and purpose.</td>
+</tr>
+<tr>
+<td><code>output/</code></td>
+<td>Tables, figures, maps, model objects, reports.</td>
+<td>Use clear names; avoid unexplained versions of the same thing.</td>
+</tr>
+</tbody>
+</table>
+
+The workflow I want is boring in a good way:
+
+<div class="note-grid">
+<div class="note-card">
+<strong>Import</strong>
+<p>Read raw files, keep source names, and do only minimal parsing.</p>
+</div>
+<div class="note-card">
+<strong>Construct</strong>
+<p>Clean keys, join sources, make derived variables, and save checks near risky steps.</p>
+</div>
+<div class="note-card">
+<strong>Analyze</strong>
+<p>Start from the final constructed data, not from a half-edited object in the environment.</p>
+</div>
+<div class="note-card">
+<strong>Send</strong>
+<p>Rerun from a clean session and make sure the expected files were recreated.</p>
+</div>
+</div>
+
+Version control, usually git and often GitHub, is also useful. I would usually make small commits with messages that explain the change, and use branches or pull requests when the project has several people or when a change is risky. Heavy data files, repeated generated outputs, and private files should usually go in `.gitignore`.
+
+For reproducibility, I would keep the seed discussion near the code that actually uses randomness. Fixed seeds (e.g., `set.seed(123)`) are deterministic - see [this blog post](https://blog.genesmindsmachines.com/p/if-your-random-seed-is-42-i-will). One option is to generate a seed once, record it, and then keep using that same seed throughout the project.
+
+Before sending results, I would rerun the relevant scripts from a clean session and check the main outputs. This usually means row counts, duplicate keys, unmatched observations, summary statistics, missing values, and zeros in places where zeros may indicate a construction problem.
+
 # Working in R
 
 ## Style and speed
@@ -168,6 +234,216 @@ Another example is `copy_labels`, which exists in both `sjlabelled` and `labelle
 
 When reading data, parse dates explicitly rather than trusting whatever type R guessed. For example, use `as.Date()` or `lubridate` functions, then check that the result looks right; `"01/02/2020"` is not self-explanatory unless we know the date format.
 
+## Country-level analysis
+
+A lot of the analysis I have done is at the country level, or uses countries as parent units. So most of the examples here use countries, but the same habits apply to other units too.
+
+### Country identifiers
+Country names are useful for plots and tables, but they are often inconsistent across datasets. For example, "Ivory Coast" and "Cote d'Ivoire" may refer to the same country. For joins, it is usually better to rely on ISO codes, while keeping the names as labels.
+
+That does not mean codes are magic. South Sudan may appear as `SSD` in one source and `SDS` in another; Namibia's ISO2 code is `NA`, which can be confused with missing data if the file is read carelessly. Aggregates, disputed areas, territories, historical countries, and source-specific codes still need checks.
+
+For illustration, I use WDI population and GDP files downloaded as CSVs. The construction code is not the point here, so I would hide it in notes or in a script. The useful check is to convert ISO3 to ISO2, then inspect the rows that failed conversion.
+
+```{r build-country-panel, include=FALSE}
+pop <- read_csv(here("data", "API_SP.POP.TOTL_DS2_en_csv_v2_33112.csv"), skip = 4) |>
+  pivot_longer(
+    cols = matches("^\\d{4}$"),
+    names_to = "year",
+    values_to = "pop"
+  ) |>
+  transmute(
+    iso3 = `Country Code`,
+    country_name = `Country Name`,
+    year = as.integer(year),
+    pop
+  )
+
+gdp <- read_csv(here("data", "API_NY.GDP.MKTP.KD_DS2_en_csv_v2_34247.csv"), skip = 4) |>
+  pivot_longer(
+    cols = matches("^\\d{4}$"),
+    names_to = "year",
+    values_to = "gdp"
+  ) |>
+  transmute(
+    iso3 = `Country Code`,
+    country_name = `Country Name`,
+    year = as.integer(year),
+    gdp
+  )
+
+country_panel_all <- full_join(pop, gdp, join_by(iso3, country_name, year)) |>
+  transmute(
+    iso2 = countrycode::countrycode(iso3, "iso3c", "iso2c", warn = FALSE),
+    iso3,
+    country_name,
+    year,
+    gdp_b = round(gdp / 1e9, 5),
+    pop_m = round(pop / 1e6, 3)
+  ) |>
+  filter(year >= 2000) |>
+  arrange(iso2, year)
+```
+
+This WDI file includes rows that are not ordinary countries, such as regions and income groups. One quick diagnostic is to inspect the ISO3 codes that failed to convert to ISO2. Most failed conversions are aggregates, but this check also catches special cases that need manual handling, like Kosovo.
+
+```{r country-code-triage-data, include=FALSE}
+unmatched_iso3 <- country_panel_all |> 
+  filter(is.na(iso2)) |> 
+  distinct(iso3, country_name) |> 
+  arrange(country_name)
+
+country_code_triage <- tibble::tribble(
+  ~raw_name, ~iso3, ~converted_iso2, ~decision, ~why,
+  "United States", "USA", "US", "keep", "ordinary country",
+  "Kosovo", "XKX", NA_character_, "manual code XK", "special case",
+  "European Union", "EUU", NA_character_, "custom code EU", "aggregate",
+  "Low income", "LIC", NA_character_, "drop", "aggregate"
+)
+```
+
+```{r country-code-triage-table, results='asis', echo=FALSE}
+triage_rows <- country_code_triage |>
+  mutate(
+    converted_iso2 = if_else(is.na(converted_iso2), "failed", converted_iso2),
+    row_class = if_else(converted_iso2 == "failed", "check-warn", "check-good")
+  )
+
+cat(
+  '<table class="mini-table">',
+  '<thead><tr><th>Raw label</th><th>ISO3</th><th>ISO2 conversion</th><th>Decision</th><th>Why</th></tr></thead>',
+  '<tbody>',
+  paste0(
+    '<tr><td>', triage_rows$raw_name,
+    '</td><td><code>', triage_rows$iso3,
+    '</code></td><td class="', triage_rows$row_class, '"><code>', triage_rows$converted_iso2,
+    '</code></td><td>', triage_rows$decision,
+    '</td><td>', triage_rows$why,
+    '</td></tr>',
+    collapse = "\n"
+  ),
+  '</tbody></table>',
+  sep = "\n"
+)
+```
+
+Kosovo and the EU should not silently disappear. They are different kinds of exceptions, so they need different decisions. Here I manually add `XK` for Kosovo and keep `EU` as a custom aggregate. The rest of the failed conversions are dropped from the country panel.
+
+```{r fix-country-codes, class.source='fold-show'}
+country_panel <- country_panel_all |> 
+  mutate(
+    iso2 = case_when(
+      iso3 == "XKX" ~ "XK",
+      iso3 == "EUU" ~ "EU", 
+      TRUE ~ iso2
+      )
+  ) |> 
+  filter(!is.na(iso2))
+```
+
+### Geographic consistency over time
+
+Geographic units do not always keep the same boundaries over time. Countries change borders, gain independence, or split; administrative units can change too. Datasets handle those changes differently. A value in a given year might refer to current borders, old borders, or something in between.
+For country-level data, pay special attention to places whose borders changed during the period of analysis, or soon before it. "Sudan" might mean present-day Sudan, or Sudan including South Sudan. Montenegro might appear under Yugoslavia, Serbia and Montenegro, or Montenegro. Kosovo has the same problem, even though it is not named in "Serbia and Montenegro", and it may not appear at all in some datasets. Taiwan can also be coded or named in different ways depending on the source.
+
+<!-- To add: perhaps make this a checklist too: which boundaries does the dataset use; are units historical or current; were any units split/merged during the period; are successor states treated consistently; and do plots around the transition years reveal suspicious jumps. -->
+
+This example looks fine: there are no obvious population spikes around South Sudan's independence.
+```{r plot-sudan-south-sudan}
+country_panel |>
+  filter(iso2 %in% c("SD", "SS"), year %in% 2006:2014) |>
+  ggplot() + 
+  geom_line(aes(x = year, y = pop_m, group = country_name, color = country_name))
+
+```
+
+## Definitions and units
+
+Pay attention to definitions and units. `gdp` could mean nominal GDP in current local currency, nominal GDP in current US dollars, real GDP in constant 2015 US dollars, or PPP-adjusted GDP. The same short variable name can hide a very different quantity.
+
+Even after the source and units are clear, small changes in the formula can create different variables. Total GDP, GDP per person, logged GDP, and logged GDP per person are not interchangeable.
+
+<table class="mini-table">
+<thead>
+<tr><th>Measure</th><th>Definition in code</th><th>Different from</th></tr>
+</thead>
+<tbody>
+<tr>
+<td>Total GDP</td>
+<td><code>gdp</code></td>
+<td><code>gdp / pop</code></td>
+</tr>
+<tr>
+<td>Population</td>
+<td><code>pop</code></td>
+<td><code>gdp</code></td>
+</tr>
+<tr>
+<td>GDP per person</td>
+<td><code>gdp / pop</code></td>
+<td><code>gdp</code></td>
+</tr>
+<tr>
+<td>Log GDP per person</td>
+<td><code>log(gdp / pop)</code></td>
+<td><code>log(gdp) / pop</code></td>
+</tr>
+<tr>
+<td>Log GDP divided by population</td>
+<td><code>log(gdp) / pop</code></td>
+<td><code>log(gdp / pop)</code></td>
+</tr>
+</tbody>
+</table>
+
+
+```{r compare-gdp-definitions, include=FALSE}
+gdp_definition_check <- country_panel |>
+  filter(year == 2024) |>
+  mutate(
+    gdp = gdp_b * 1000000000,
+    pop = pop_m * 1000000,
+    gdp_per_person = gdp / pop,
+    log_gdp = log(gdp),
+    log_gdp_per_person = log(gdp / pop),
+    log_gdp_divided_by_pop = log(gdp) / pop
+  ) |>
+  summarise(
+    `gdp` = cor(gdp, pop, use = "complete.obs"),
+    `gdp / pop` = cor(gdp_per_person, pop, use = "complete.obs"),
+    `log(gdp)` = cor(log_gdp, pop, use = "complete.obs"),
+    `log(gdp / pop)` = cor(log_gdp_per_person, pop, use = "complete.obs"),
+    `log(gdp) / pop` = cor(log_gdp_divided_by_pop, pop, use = "complete.obs")
+  )
+```
+
+```{r gdp-definition-comparison-table, results='asis', echo=FALSE}
+definition_rows <- gdp_definition_check |>
+  pivot_longer(
+    cols = everything(),
+    names_to = "definition",
+    values_to = "correlation_with_population"
+  )
+
+cat(
+  '<table class="mini-table">',
+  '<thead><tr><th>Definition in code</th><th>Correlation with population</th></tr></thead>',
+  '<tbody>',
+  paste0(
+    '<tr><td><code>', definition_rows$definition,
+    '</code></td><td>', round(definition_rows$correlation_with_population, 2),
+    '</td></tr>',
+    collapse = "\n"
+  ),
+  '</tbody></table>',
+  sep = "\n"
+)
+```
+
+Before using `log()`, check the values and units. Logging GDP in dollars is not the same as logging GDP in millions, and logging very small values can produce numbers that are technically correct but not very meaningful.
+
+Labels and categories also need some care. Value labels can be useful for understanding survey or administrative data, but they can disappear, change, or conflict after transformations; and factors should be checked before recoding, joining, or modelling.
+
 ## Joins
 
 Quite often we need to join datasets using one or more common keys. 
@@ -293,129 +569,6 @@ Joining by country name looks tempting, but it is fragile: "United States" and "
 In some datasets there may be aggregates (e.g., "Middle East" in a country-level dataset). In some datasets there are variables that refer to those, but not always, and the names of the 'aggregate' countries might be different across different datasets (e.g., in two different datasets of FAOSTAT, there is in one dataset (https://www.fao.org/faostat/en/#data/FBSH) an aggregated region of 'Low Income Food Deficit Countries', but in another (https://www.fao.org/faostat/en/#data/QCL) this appears as 'Low Income Food Deficit Countries (LIFDCs)'. Given that there is not always an ISO2/3 equivalent for each aggregate, one needs to pay attention to those cases. 
 
 <!-- To add: perhaps turn this into a short checklist: identify aggregate rows; decide whether to keep, drop, or reconstruct them; document the choice; and compare constructed aggregates to a reference source when possible. -->
-
-# Country-level analysis
-
-A lot of the analysis I have done is at the country level, or uses countries as parent units. So most of the examples here use countries, but the same habits apply to other units too.
-
-## Country identifiers
-Country names are useful for plots and tables, but they are often inconsistent across datasets. For example, "Ivory Coast" and "Cote d'Ivoire" may refer to the same country. For joins, it is usually better to rely on ISO codes, while keeping the names as labels.
-
-That does not mean codes are magic. South Sudan may appear as `SSD` in one source and `SDS` in another; Namibia's ISO2 code is `NA`, which can be confused with missing data if the file is read carelessly. Aggregates, disputed areas, territories, historical countries, and source-specific codes still need checks.
-
-For illustration, I use WDI population and GDP files downloaded as CSVs. The construction code is not the point here, so I would hide it in notes or in a script. The useful check is to convert ISO3 to ISO2, then inspect the rows that failed conversion.
-
-```{r build-country-panel, include=FALSE}
-pop <- read_csv(here("data", "API_SP.POP.TOTL_DS2_en_csv_v2_33112.csv"), skip = 4) |>
-  pivot_longer(
-    cols = matches("^\\d{4}$"),
-    names_to = "year",
-    values_to = "pop"
-  ) |>
-  transmute(
-    iso3 = `Country Code`,
-    country_name = `Country Name`,
-    year = as.integer(year),
-    pop
-  )
-
-gdp <- read_csv(here("data", "API_NY.GDP.MKTP.KD_DS2_en_csv_v2_34247.csv"), skip = 4) |>
-  pivot_longer(
-    cols = matches("^\\d{4}$"),
-    names_to = "year",
-    values_to = "gdp"
-  ) |>
-  transmute(
-    iso3 = `Country Code`,
-    country_name = `Country Name`,
-    year = as.integer(year),
-    gdp
-  )
-
-country_panel_all <- full_join(pop, gdp, join_by(iso3, country_name, year)) |>
-  transmute(
-    iso2 = countrycode::countrycode(iso3, "iso3c", "iso2c", warn = FALSE),
-    iso3,
-    country_name,
-    year,
-    gdp_b = round(gdp / 1e9, 5),
-    pop_m = round(pop / 1e6, 3)
-  ) |>
-  filter(year >= 2000) |>
-  arrange(iso2, year)
-```
-
-This WDI file includes rows that are not ordinary countries, such as regions and income groups. One quick diagnostic is to inspect the ISO3 codes that failed to convert to ISO2. Most failed conversions are aggregates, but this check also catches special cases that need manual handling, like Kosovo.
-
-```{r country-code-triage-data, include=FALSE}
-unmatched_iso3 <- country_panel_all |> 
-  filter(is.na(iso2)) |> 
-  distinct(iso3, country_name) |> 
-  arrange(country_name)
-
-country_code_triage <- tibble::tribble(
-  ~raw_name, ~iso3, ~converted_iso2, ~decision, ~why,
-  "United States", "USA", "US", "keep", "ordinary country",
-  "Kosovo", "XKX", NA_character_, "manual code XK", "special case",
-  "European Union", "EUU", NA_character_, "custom code EU", "aggregate",
-  "Low income", "LIC", NA_character_, "drop", "aggregate"
-)
-```
-
-```{r country-code-triage-table, results='asis', echo=FALSE}
-triage_rows <- country_code_triage |>
-  mutate(
-    converted_iso2 = if_else(is.na(converted_iso2), "failed", converted_iso2),
-    row_class = if_else(converted_iso2 == "failed", "check-warn", "check-good")
-  )
-
-cat(
-  '<table class="mini-table">',
-  '<thead><tr><th>Raw label</th><th>ISO3</th><th>ISO2 conversion</th><th>Decision</th><th>Why</th></tr></thead>',
-  '<tbody>',
-  paste0(
-    '<tr><td>', triage_rows$raw_name,
-    '</td><td><code>', triage_rows$iso3,
-    '</code></td><td class="', triage_rows$row_class, '"><code>', triage_rows$converted_iso2,
-    '</code></td><td>', triage_rows$decision,
-    '</td><td>', triage_rows$why,
-    '</td></tr>',
-    collapse = "\n"
-  ),
-  '</tbody></table>',
-  sep = "\n"
-)
-```
-
-Kosovo and the EU should not silently disappear. They are different kinds of exceptions, so they need different decisions. Here I manually add `XK` for Kosovo and keep `EU` as a custom aggregate. The rest of the failed conversions are dropped from the country panel.
-
-```{r fix-country-codes, class.source='fold-show'}
-country_panel <- country_panel_all |> 
-  mutate(
-    iso2 = case_when(
-      iso3 == "XKX" ~ "XK",
-      iso3 == "EUU" ~ "EU", 
-      TRUE ~ iso2
-      )
-  ) |> 
-  filter(!is.na(iso2))
-```
-
-## Geographic consistency over time
-
-Geographic units do not always keep the same boundaries over time. Countries change borders, gain independence, or split; administrative units can change too. Datasets handle those changes differently. A value in a given year might refer to current borders, old borders, or something in between.
-For country-level data, pay special attention to places whose borders changed during the period of analysis, or soon before it. "Sudan" might mean present-day Sudan, or Sudan including South Sudan. Montenegro might appear under Yugoslavia, Serbia and Montenegro, or Montenegro. Kosovo has the same problem, even though it is not named in "Serbia and Montenegro", and it may not appear at all in some datasets. Taiwan can also be coded or named in different ways depending on the source.
-
-<!-- To add: perhaps make this a checklist too: which boundaries does the dataset use; are units historical or current; were any units split/merged during the period; are successor states treated consistently; and do plots around the transition years reveal suspicious jumps. -->
-
-This example looks fine: there are no obvious population spikes around South Sudan's independence.
-```{r plot-sudan-south-sudan}
-country_panel |>
-  filter(iso2 %in% c("SD", "SS"), year %in% 2006:2014) |>
-  ggplot() + 
-  geom_line(aes(x = year, y = pop_m, group = country_name, color = country_name))
-
-```
 
 # Missing values
 Missing values can mean different things - the value was not collected, it was not applicable, it was suppressed, it failed to merge, or it is genuinely unknown. R will often show these as `NA`. `NaN` is the result of an undefined numeric operation, such as `0 / 0`. `NULL` usually means that the object is absent.
@@ -559,6 +712,113 @@ df |>
     .by = group
   )
 ```
+
+# Debugging and validating results
+
+A lot of mistakes are much easier to catch immediately after the step that created them. I would usually run some checks after important joins, aggregations, spatial matches, and output construction, rather than only looking at the final regression table or figure.
+
+## Messages and quick checks
+
+One thing I have not done enough, but probably should, is adding a few short messages after important construction steps, to make mistakes easier to notice. Adding too many can make the code noisy, but after joins, aggregations, spatial matches, or output construction, one or two checks can save a lot of confusion later.
+
+<div class="note-grid">
+<div class="note-card">
+<strong>After a join</strong>
+<p>Did rows multiply? Which keys failed to match? Did new variables become missing?</p>
+</div>
+<div class="note-card">
+<strong>After an aggregation</strong>
+<p>How many rows were collapsed? How many groups have missing or zero values?</p>
+</div>
+<div class="note-card">
+<strong>After an output step</strong>
+<p>Was the expected file created? How many rows or features did it contain?</p>
+</div>
+</div>
+
+```{r join-messages, message=TRUE}
+joined_country_regions <- country_regions |>
+  left_join(
+    country_gdp |> 
+      select(-country_name),
+    join_by(iso3)
+  )
+
+unmatched_country_regions <- country_regions |>
+  filter_out(iso3 %in% country_gdp$iso3)
+
+message(
+  n_distinct(country_regions$iso3) - nrow(unmatched_country_regions), " of ",
+  n_distinct(country_regions$iso3), " country-region units matched to GDP."
+)
+
+message(
+  nrow(unmatched_country_regions), " country-region units did not match to GDP."
+)
+
+message(
+  sum(is.na(joined_country_regions$gdp_b)), " rows have missing GDP after the join."
+)
+```
+
+This is deliberately a bit plain. A good message is usually boring, specific, and close to the step that could have gone wrong.
+
+## Checks after risky steps
+
+I would think of this as a small checklist after risky steps, not as a separate validation project:
+
+<table class="mini-table">
+<thead>
+<tr><th>After this step</th><th>Useful quick check</th><th>Useful message</th></tr>
+</thead>
+<tbody>
+<tr>
+<td>Join</td>
+<td>Row counts before and after; duplicate keys; unmatched keys; missingness in new variables.</td>
+<td><code>247 of 250 country-year rows matched; 3 unmatched ISO3 codes.</code></td>
+</tr>
+<tr>
+<td>Aggregation</td>
+<td>Rows collapsed per group; groups with all missing inputs; unexpected zeros or extreme totals.</td>
+<td><code>Collapsed 12,500 rows to 250 groups; 4 groups have all-missing GDP.</code></td>
+</tr>
+<tr>
+<td>Spatial match</td>
+<td>Unmatched points or polygons; multiple matches; a quick map of matched and unmatched units.</td>
+<td><code>98.6% of points matched to an admin unit; 42 points unmatched.</code></td>
+</tr>
+<tr>
+<td>Output construction</td>
+<td>Expected file exists; row count, column count, CRS, and key variables are present.</td>
+<td><code>Wrote final_country_panel.rds with 5,250 rows and 37 columns.</code></td>
+</tr>
+</tbody>
+</table>
+
+Other useful checks are boring but effective: impossible values, edge cases, specific examples, random rows, plots over time or on maps, and comparisons to an external source when possible. For example, after cleaning World Bank data and merging countries, if the values look odd, I would check IMF, Eurostat, or a publication and see whether the magnitude is reasonably close.
+
+Before sending results, I would usually rerun the relevant script from a clean session and check that the expected outputs were recreated. If something looks odd but is probably fine, it is still worth mentioning it briefly rather than letting the next person rediscover it.
+
+One compact check after a join might look like this:
+
+```{r join-validation-example}
+join_check <- country_regions |>
+  left_join(
+    country_gdp |> select(-country_name),
+    join_by(iso3)
+  )
+
+tibble::tibble(
+  rows_before = nrow(country_regions),
+  rows_after = nrow(join_check),
+  unmatched_iso3 = nrow(anti_join(country_regions, country_gdp, join_by(iso3))),
+  missing_gdp = sum(is.na(join_check$gdp_b))
+)
+```
+
+## Assumptions and judgment calls
+
+Some choices are not purely technical, so it is better to document them explicitly. For example: dropping aggregate regions, manually coding Kosovo, using the largest spatial overlap, treating all-missing sums as `NA`, using current boundaries for historical data, or choosing one representative point for a polygon. Even a short note helps if someone later needs to understand why the data look the way they do.
 
 # Plotting
 
@@ -1158,7 +1418,65 @@ ggplot() +
 ### Finding a 'representative' category
 Some spatial datasets force a choice between categories. Mines data, for example, may have one row per mine, or a cell-level value for "suitability for a given commodity". If we aggregate to a larger unit, what should the result mean? We could sum the number of distinct mines, use the commodity with the highest suitability value, count whether any mine of each type exists, or do something else. There is no obvious answer here. The right choice depends on whether the variable is meant to capture abundance, dominance, exposure, or just the presence of something.
 
-## Example: protected area coverage
+# Handoff notes
+
+When handing work to someone else, I would usually include a short note rather than only sending the files. Useful things to mention:
+
+- what changed
+- which scripts or files matter
+- where the main outputs are
+- which checks were run
+- assumptions or manual decisions
+- strange cases that are probably fine
+- things that are unfinished or need judgment
+
+# AI use
+
+This will probably change soon, but for now I like separating reusable preferences from project-specific context. One possible structure is:
+
+```text
+ai_instructions/
+  general/
+    coding_style.md
+    data_checks.md
+    writing_style.md
+  project/
+    context.md
+    pipeline.md
+    datasets.md
+```
+
+<div class="note-grid">
+<div class="note-card">
+<strong>Reusable notes</strong>
+<p>Coding style, preferred packages, recurring checks, and writing preferences.</p>
+</div>
+<div class="note-card">
+<strong>Project notes</strong>
+<p>Question, unit of observation, key datasets, pipeline order, and known edge cases.</p>
+</div>
+</div>
+
+The general files can include coding conventions, such as using `|>` rather than `%>%`, and recurring data-construction checks, such as looking for missing values after merges or joins that multiply rows. The project files can describe the question, the main unit of observation, the code structure, and the intended order of the data pipeline. This uses context, so I would not overdo it for small tasks. For longer projects, it can save repeated explanations and reduce mistakes. If there are project-specific coding conventions, I would add them as short additions to the general convention rather than copying the whole thing again.
+
+For tasks that are not obvious, I prefer to ask the AI to restate the task or interview me briefly before implementing. The prompt should name the risky part of the work, not just the task.
+
+<table class="mini-table">
+<tr><th>Bad prompt</th><th>Better prompt</th><th>Ask it to check</th></tr>
+<tr><td>Fix this merge.</td><td>Use the project context and fix the country-year merge into the master panel.</td><td>Duplicate keys, unmatched rows, and row-count changes before/after.</td></tr>
+<tr><td>Make this map.</td><td>Join the EU GDP data to the boundary file and make a choropleth by GDP per capita.</td><td>Which countries failed to match, whether the join key is ISO2/ISO3/name, and whether values look plausible.</td></tr>
+<tr><td>Summarize this raster.</td><td>Extract population totals by admin unit using the population raster and explain how partial cells are handled.</td><td>Whether the variable should be summed or averaged, CRS, cell weights, and a few hand-inspected units.</td></tr>
+<tr><td>Clean this variable.</td><td>Recode the treatment variable using the codebook and flag values not covered by the recode.</td><td>Unused categories, new missing values, and examples from each recoded group.</td></tr>
+</table>
+
+### AI and validation
+
+AI is useful for writing code, explaining unfamiliar packages, and finding possible bugs, but plausible code can still do the wrong thing. I would ask it to add messages and checks, summarize what changed, inspect examples rather than only summary statistics, and compare important constructed variables to an external source when possible.
+
+
+<!-- perhaps turn the wdpa into a full example of workflow and validation in an appendix -->
+
+# Example: protected area coverage
 
 Suppose we want to calculate the share of area of a unit that is protected in each year. For example, we can use WDPA polygons in Namibia. This example ignores points data (which also exists in the World Database of Protected Areas) and accounts only for polygons.
 
@@ -1336,320 +1654,3 @@ namibia_units |>
 
 A few quick checks are usually enough to catch the obvious problems: which units have zero protected area, which have surprisingly high values, whether any shares exceed one before `pmin()`, and what a handful of strange cases look like on a map.
 
-# Debugging and validating results
-
-A lot of mistakes are much easier to catch immediately after the step that created them. I would usually run some checks after important joins, aggregations, spatial matches, and output construction, rather than only looking at the final regression table or figure.
-
-## Messages and quick checks
-
-One thing I have not done enough, but probably should, is adding a few short messages after important construction steps, to make mistakes easier to notice. Adding too many can make the code noisy, but after joins, aggregations, spatial matches, or output construction, one or two checks can save a lot of confusion later.
-
-<div class="note-grid">
-<div class="note-card">
-<strong>After a join</strong>
-<p>Did rows multiply? Which keys failed to match? Did new variables become missing?</p>
-</div>
-<div class="note-card">
-<strong>After an aggregation</strong>
-<p>How many rows were collapsed? How many groups have missing or zero values?</p>
-</div>
-<div class="note-card">
-<strong>After an output step</strong>
-<p>Was the expected file created? How many rows or features did it contain?</p>
-</div>
-</div>
-
-```{r join-messages, message=TRUE}
-joined_country_regions <- country_regions |>
-  left_join(
-    country_gdp |> 
-      select(-country_name),
-    join_by(iso3)
-  )
-
-unmatched_country_regions <- country_regions |>
-  filter_out(iso3 %in% country_gdp$iso3)
-
-message(
-  n_distinct(country_regions$iso3) - nrow(unmatched_country_regions), " of ",
-  n_distinct(country_regions$iso3), " country-region units matched to GDP."
-)
-
-message(
-  nrow(unmatched_country_regions), " country-region units did not match to GDP."
-)
-
-message(
-  sum(is.na(joined_country_regions$gdp_b)), " rows have missing GDP after the join."
-)
-```
-
-This is deliberately a bit plain. A good message is usually boring, specific, and close to the step that could have gone wrong.
-
-## Checks after risky steps
-
-I would think of this as a small checklist after risky steps, not as a separate validation project:
-
-<table class="mini-table">
-<thead>
-<tr><th>After this step</th><th>Useful quick check</th><th>Useful message</th></tr>
-</thead>
-<tbody>
-<tr>
-<td>Join</td>
-<td>Row counts before and after; duplicate keys; unmatched keys; missingness in new variables.</td>
-<td><code>247 of 250 country-year rows matched; 3 unmatched ISO3 codes.</code></td>
-</tr>
-<tr>
-<td>Aggregation</td>
-<td>Rows collapsed per group; groups with all missing inputs; unexpected zeros or extreme totals.</td>
-<td><code>Collapsed 12,500 rows to 250 groups; 4 groups have all-missing GDP.</code></td>
-</tr>
-<tr>
-<td>Spatial match</td>
-<td>Unmatched points or polygons; multiple matches; a quick map of matched and unmatched units.</td>
-<td><code>98.6% of points matched to an admin unit; 42 points unmatched.</code></td>
-</tr>
-<tr>
-<td>Output construction</td>
-<td>Expected file exists; row count, column count, CRS, and key variables are present.</td>
-<td><code>Wrote final_country_panel.rds with 5,250 rows and 37 columns.</code></td>
-</tr>
-</tbody>
-</table>
-
-Other useful checks are boring but effective: impossible values, edge cases, specific examples, random rows, plots over time or on maps, and comparisons to an external source when possible. For example, after cleaning World Bank data and merging countries, if the values look odd, I would check IMF, Eurostat, or a publication and see whether the magnitude is reasonably close.
-
-Before sending results, I would usually rerun the relevant script from a clean session and check that the expected outputs were recreated. If something looks odd but is probably fine, it is still worth mentioning it briefly rather than letting the next person rediscover it.
-
-One compact check after a join might look like this:
-
-```{r join-validation-example}
-join_check <- country_regions |>
-  left_join(
-    country_gdp |> select(-country_name),
-    join_by(iso3)
-  )
-
-tibble::tibble(
-  rows_before = nrow(country_regions),
-  rows_after = nrow(join_check),
-  unmatched_iso3 = nrow(anti_join(country_regions, country_gdp, join_by(iso3))),
-  missing_gdp = sum(is.na(join_check$gdp_b))
-)
-```
-
-# Constructing workflows
-
-I prefer working inside an R project, which makes relative paths more stable. Functions like `here::here()` are useful for referring to files from the project root, instead of relying on whatever folder happens to be active.
-
-A simple project structure is usually enough:
-
-<table class="mini-table">
-<thead>
-<tr><th>Folder or file</th><th>What goes there</th><th>Rule of thumb</th></tr>
-</thead>
-<tbody>
-<tr>
-<td><code>data/raw/</code></td>
-<td>Original downloads, exports, shapefiles, survey files.</td>
-<td>Keep close to the original. Do not edit by hand.</td>
-</tr>
-<tr>
-<td><code>data/intermediate/</code></td>
-<td>Cleaned or partially constructed files.</td>
-<td>Useful when a step is slow or shared across scripts.</td>
-</tr>
-<tr>
-<td><code>data/final/</code></td>
-<td>Analysis-ready datasets.</td>
-<td>These should be recreated from scripts, not patched manually.</td>
-</tr>
-<tr>
-<td><code>R/</code> or numbered scripts</td>
-<td><code>01_import</code>, <code>02_clean</code>, <code>03_construct</code>, <code>04_analysis</code>.</td>
-<td>Use names that show the order and purpose.</td>
-</tr>
-<tr>
-<td><code>output/</code></td>
-<td>Tables, figures, maps, model objects, reports.</td>
-<td>Use clear names; avoid unexplained versions of the same thing.</td>
-</tr>
-</tbody>
-</table>
-
-The workflow I want is boring in a good way:
-
-<div class="note-grid">
-<div class="note-card">
-<strong>Import</strong>
-<p>Read raw files, keep source names, and do only minimal parsing.</p>
-</div>
-<div class="note-card">
-<strong>Construct</strong>
-<p>Clean keys, join sources, make derived variables, and save checks near risky steps.</p>
-</div>
-<div class="note-card">
-<strong>Analyze</strong>
-<p>Start from the final constructed data, not from a half-edited object in the environment.</p>
-</div>
-<div class="note-card">
-<strong>Send</strong>
-<p>Rerun from a clean session and make sure the expected files were recreated.</p>
-</div>
-</div>
-
-Version control, usually git and often GitHub, is also useful. I would usually make small commits with messages that explain the change, and use branches or pull requests when the project has several people or when a change is risky. Heavy data files, repeated generated outputs, and private files should usually go in `.gitignore`.
-
-For reproducibility, I would keep the seed discussion near the code that actually uses randomness. Fixed seeds (e.g., `set.seed(123)`) are deterministic - see [this blog post](https://blog.genesmindsmachines.com/p/if-your-random-seed-is-42-i-will). One option is to generate a seed once, record it, and then keep using that same seed throughout the project.
-
-Before sending results, I would rerun the relevant scripts from a clean session and check the main outputs. This usually means row counts, duplicate keys, unmatched observations, summary statistics, missing values, and zeros in places where zeros may indicate a construction problem.
-
-## Handoff notes
-
-When handing work to someone else, I would usually include a short note rather than only sending the files. Useful things to mention:
-
-- what changed
-- which scripts or files matter
-- where the main outputs are
-- which checks were run
-- assumptions or manual decisions
-- strange cases that are probably fine
-- things that are unfinished or need judgment
-
-## Definitions and units
-
-Pay attention to definitions and units. `gdp` could mean nominal GDP in current local currency, nominal GDP in current US dollars, real GDP in constant 2015 US dollars, or PPP-adjusted GDP. The same short variable name can hide a very different quantity.
-
-Even after the source and units are clear, small changes in the formula can create different variables. Total GDP, GDP per person, logged GDP, and logged GDP per person are not interchangeable.
-
-<table class="mini-table">
-<thead>
-<tr><th>Measure</th><th>Definition in code</th><th>Different from</th></tr>
-</thead>
-<tbody>
-<tr>
-<td>Total GDP</td>
-<td><code>gdp</code></td>
-<td><code>gdp / pop</code></td>
-</tr>
-<tr>
-<td>Population</td>
-<td><code>pop</code></td>
-<td><code>gdp</code></td>
-</tr>
-<tr>
-<td>GDP per person</td>
-<td><code>gdp / pop</code></td>
-<td><code>gdp</code></td>
-</tr>
-<tr>
-<td>Log GDP per person</td>
-<td><code>log(gdp / pop)</code></td>
-<td><code>log(gdp) / pop</code></td>
-</tr>
-<tr>
-<td>Log GDP divided by population</td>
-<td><code>log(gdp) / pop</code></td>
-<td><code>log(gdp / pop)</code></td>
-</tr>
-</tbody>
-</table>
-
-
-```{r compare-gdp-definitions, include=FALSE}
-gdp_definition_check <- country_panel |>
-  filter(year == 2024) |>
-  mutate(
-    gdp = gdp_b * 1000000000,
-    pop = pop_m * 1000000,
-    gdp_per_person = gdp / pop,
-    log_gdp = log(gdp),
-    log_gdp_per_person = log(gdp / pop),
-    log_gdp_divided_by_pop = log(gdp) / pop
-  ) |>
-  summarise(
-    `gdp` = cor(gdp, pop, use = "complete.obs"),
-    `gdp / pop` = cor(gdp_per_person, pop, use = "complete.obs"),
-    `log(gdp)` = cor(log_gdp, pop, use = "complete.obs"),
-    `log(gdp / pop)` = cor(log_gdp_per_person, pop, use = "complete.obs"),
-    `log(gdp) / pop` = cor(log_gdp_divided_by_pop, pop, use = "complete.obs")
-  )
-```
-
-```{r gdp-definition-comparison-table, results='asis', echo=FALSE}
-definition_rows <- gdp_definition_check |>
-  pivot_longer(
-    cols = everything(),
-    names_to = "definition",
-    values_to = "correlation_with_population"
-  )
-
-cat(
-  '<table class="mini-table">',
-  '<thead><tr><th>Definition in code</th><th>Correlation with population</th></tr></thead>',
-  '<tbody>',
-  paste0(
-    '<tr><td><code>', definition_rows$definition,
-    '</code></td><td>', round(definition_rows$correlation_with_population, 2),
-    '</td></tr>',
-    collapse = "\n"
-  ),
-  '</tbody></table>',
-  sep = "\n"
-)
-```
-
-Before using `log()`, check the values and units. Logging GDP in dollars is not the same as logging GDP in millions, and logging very small values can produce numbers that are technically correct but not very meaningful.
-
-Labels and categories also need some care. Value labels can be useful for understanding survey or administrative data, but they can disappear, change, or conflict after transformations; and factors should be checked before recoding, joining, or modelling.
-
-## Assumptions and judgment calls
-
-Some choices are not purely technical, so it is better to document them explicitly. For example: dropping aggregate regions, manually coding Kosovo, using the largest spatial overlap, treating all-missing sums as `NA`, using current boundaries for historical data, or choosing one representative point for a polygon. Even a short note helps if someone later needs to understand why the data look the way they do.
-
-# AI use
-
-This will probably change soon, but for now I like separating reusable preferences from project-specific context. One possible structure is:
-
-```text
-ai_instructions/
-  general/
-    coding_style.md
-    data_checks.md
-    writing_style.md
-  project/
-    context.md
-    pipeline.md
-    datasets.md
-```
-
-<div class="note-grid">
-<div class="note-card">
-<strong>Reusable notes</strong>
-<p>Coding style, preferred packages, recurring checks, and writing preferences.</p>
-</div>
-<div class="note-card">
-<strong>Project notes</strong>
-<p>Question, unit of observation, key datasets, pipeline order, and known edge cases.</p>
-</div>
-</div>
-
-The general files can include coding conventions, such as using `|>` rather than `%>%`, and recurring data-construction checks, such as looking for missing values after merges or joins that multiply rows. The project files can describe the question, the main unit of observation, the code structure, and the intended order of the data pipeline. This uses context, so I would not overdo it for small tasks. For longer projects, it can save repeated explanations and reduce mistakes. If there are project-specific coding conventions, I would add them as short additions to the general convention rather than copying the whole thing again.
-
-For tasks that are not obvious, I prefer to ask the AI to restate the task or interview me briefly before implementing. The prompt should name the risky part of the work, not just the task.
-
-<table class="mini-table">
-<tr><th>Bad prompt</th><th>Better prompt</th><th>Ask it to check</th></tr>
-<tr><td>Fix this merge.</td><td>Use the project context and fix the country-year merge into the master panel.</td><td>Duplicate keys, unmatched rows, and row-count changes before/after.</td></tr>
-<tr><td>Make this map.</td><td>Join the EU GDP data to the boundary file and make a choropleth by GDP per capita.</td><td>Which countries failed to match, whether the join key is ISO2/ISO3/name, and whether values look plausible.</td></tr>
-<tr><td>Summarize this raster.</td><td>Extract population totals by admin unit using the population raster and explain how partial cells are handled.</td><td>Whether the variable should be summed or averaged, CRS, cell weights, and a few hand-inspected units.</td></tr>
-<tr><td>Clean this variable.</td><td>Recode the treatment variable using the codebook and flag values not covered by the recode.</td><td>Unused categories, new missing values, and examples from each recoded group.</td></tr>
-</table>
-
-### AI and validation
-
-AI is useful for writing code, explaining unfamiliar packages, and finding possible bugs, but plausible code can still do the wrong thing. I would ask it to add messages and checks, summarize what changed, inspect examples rather than only summary statistics, and compare important constructed variables to an external source when possible.
-
-
-# perhaps turn the wdpa into a full example of workflow and validation in an appendix
