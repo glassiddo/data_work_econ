@@ -172,41 +172,24 @@ When reading data, parse dates explicitly rather than trusting whatever type R g
 
 ## Joins
 
-Quite often we want to join datasets, using one or more common keys. Before joining, I would usually ask: which rows should stay, is the key unique, do both datasets use the same version of the key, and what should happen to unmatched rows or duplicate column names?
+Quite often we want to join datasets, using one or more common keys. The useful starting question is: which rows should survive this step?
 
-There are several types of joins:
+I usually prefer to start with a master dataset that includes the units used in the final analysis, and then add variables to it with `left_join()`. I use the other joins mostly for filtering, diagnostics, or coverage checks:
 
-| Join | What it keeps | When to use |
-|---|---|---|
-| `left_join` | all rows from the first dataset | adding variables to a main dataset |
-| `inner_join` | only rows that match in both datasets | keeping only units that exist in both sources |
-| `full_join` | all rows from both datasets | checking coverage across sources, less common |
-| `right_join` | all rows from the second dataset | same idea as `left_join`, but less convenient |
-| `semi_join` | rows from the first dataset that have a match in the second, without adding columns | filtering or quick diagnostics, less common |
-| `anti_join` | rows from the first dataset that do not have a match in the second | finding unmatched observations |
+| Goal | Usually use |
+|---|---|
+| Add variables to the main analysis data | `left_join()` |
+| Keep only units found in both datasets | `inner_join()` |
+| Find units that failed to match | `anti_join()` |
+| Check coverage across both sources | `full_join()` |
 
-I usually like to have a "master" dataset with the units that are used for the final analysis, and then `left_join` other datasets into it. During data construction, `inner_join` and `full_join` can also be useful at times, and I rarely use the others - although `anti_join` is good for debugging.
+The small example below has two deliberate problems: Mexico appears in the master country-region file but not in the GDP file, while Germany appears in the GDP file but not in the master file. That makes the different joins easier to see.
 
-Another consideration is the relationship between the keys:
-
-| Relationship | Meaning | Example |
-|---|---|---|
-| one-to-one | each key appears once in both datasets | one row per country in both datasets |
-| many-to-one | many rows in the main data match one row in the added data | country-year data joined to one region per country |
-| one-to-many | one row in the main data matches many rows in the added data | one country joined to several yearly rows |
-| many-to-many | keys repeat on both sides | usually risky unless explicitly intended |
-
-The default in `dplyr` is  `relationship = NULL` which does not enforce a relationship, but gives a warning for many-to-many join that was not stated as such. If we know what the relationship should be, it can be useful to state it explicitly, for example `relationship = "many-to-one"`, so the code fails when the data do not match the assumption.
-
-Another common issue is conflicting columns. If both datasets have `country` and `country_name`, for example, and we join on `country` only, then R may create columns such as `country_name.x` and `country_name.y`. That is sometimes useful for checking differences across sources, but usually it is cleaner to either use explicit suffixes or select away the unnecessary version before joining.
-
-The example below is deliberately small. We have a GDP file and a country-region file, and we want to add GDP to the country-region data.
-
-```{r simple-country-join-example}
+```{r simple-country-join-example, include=FALSE}
 country_gdp <- tibble::tibble(
-  iso3 = c("USA", "CHN", "IND"),
-  country_name = c("United States", "China", "India"),
-  gdp_b = c(23000, 18000, 3500)
+  iso3 = c("USA", "CHN", "IND", "DEU"),
+  country_name = c("United States", "China", "India", "Germany"),
+  gdp_b = c(23000, 18000, 3500, 4200)
 )
 
 country_regions <- tibble::tibble(
@@ -214,107 +197,99 @@ country_regions <- tibble::tibble(
   country_name = c("United States of America", "China", "India", "Mexico"),
   region = c("North America", "East Asia", "South Asia", "Latin America")
 )
-
-country_gdp
-
-country_regions
 ```
 
-Joining by ISO3 keeps Mexico in the master country-region file, but leaves its GDP as missing. This is usually what I want when the first dataset defines the analysis units:
+The colors mark what happens to each key: blue rows match across both files, orange exists only in the master file, and green exists only in the added GDP file.
 
-```{r left-join-country-example}
-joined_country_regions <- country_regions |>
-  left_join(
-    country_gdp |> select(-country_name),
-    join_by(iso3)
-  )
+<div class="join-visual">
+<div class="join-row-label">Input datasets</div>
+<div class="join-input-row">
+<div class="join-panel">
+<div class="join-title">Master data</div>
+<table>
+<tr><th>iso3</th><th>region</th></tr>
+<tr class="matched"><td>USA</td><td>North America</td></tr>
+<tr class="matched"><td>CHN</td><td>East Asia</td></tr>
+<tr class="matched"><td>IND</td><td>South Asia</td></tr>
+<tr class="unmatched"><td>MEX</td><td>Latin America</td></tr>
+</table>
+</div>
+<div class="join-panel">
+<div class="join-title">Added GDP data</div>
+<table>
+<tr><th>iso3</th><th>gdp_b</th></tr>
+<tr class="matched"><td>USA</td><td>23000</td></tr>
+<tr class="matched"><td>CHN</td><td>18000</td></tr>
+<tr class="matched"><td>IND</td><td>3500</td></tr>
+<tr class="added-only"><td>DEU</td><td>4200</td></tr>
+</table>
+</div>
+</div>
+<div class="join-row-label">What each join keeps</div>
+<div class="join-output-row">
+<div class="join-panel join-result">
+<div class="join-title"><code>left_join()</code></div>
+<p>Keeps the master rows. Mexico stays, but GDP is missing.</p>
+<table>
+<tr><th>Rows kept</th><td><span class="key-pill matched">USA</span><span class="key-pill matched">CHN</span><span class="key-pill matched">IND</span><span class="key-pill unmatched">MEX</span></td></tr>
+<tr><th>Dropped</th><td><span class="key-pill added-only">DEU</span></td></tr>
+</table>
+</div>
+<div class="join-panel join-result">
+<div class="join-title"><code>inner_join()</code></div>
+<p>Keeps only rows that match in both files.</p>
+<table>
+<tr><th>Rows kept</th><td><span class="key-pill matched">USA</span><span class="key-pill matched">CHN</span><span class="key-pill matched">IND</span></td></tr>
+<tr><th>Dropped</th><td><span class="key-pill unmatched">MEX</span><span class="key-pill added-only">DEU</span></td></tr>
+</table>
+</div>
+<div class="join-panel join-result">
+<div class="join-title"><code>full_join()</code></div>
+<p>Keeps everything from both files. Useful for checking coverage.</p>
+<table>
+<tr><th>Rows kept</th><td><span class="key-pill matched">USA</span><span class="key-pill matched">CHN</span><span class="key-pill matched">IND</span><span class="key-pill unmatched">MEX</span><span class="key-pill added-only">DEU</span></td></tr>
+<tr><th>Dropped</th><td>nothing</td></tr>
+</table>
+</div>
+<div class="join-panel join-result">
+<div class="join-title"><code>anti_join()</code></div>
+<p>Shows master rows that did not match anything in the added file.</p>
+<table>
+<tr><th>Rows kept</th><td><span class="key-pill unmatched">MEX</span></td></tr>
+<tr><th>Dropped</th><td><span class="key-pill matched">USA</span><span class="key-pill matched">CHN</span><span class="key-pill matched">IND</span></td></tr>
+</table>
+</div>
+</div>
+</div>
 
-joined_country_regions
-```
-
-Using `inner_join()` instead would drop Mexico, because it does not appear in the GDP file:
-
-```{r inner-join-country-example}
-country_regions |>
-  inner_join(
-    country_gdp |> select(-country_name),
-    join_by(iso3)
-  )
-```
-
-Joining by country name looks tempting, but fails here because the United States is written differently across the two datasets:
-
-```{r bad-country-name-join-example}
-country_regions |>
-  left_join(country_gdp, join_by(country_name))
-```
-
-If both datasets contain a column with the same name, R may keep both versions with suffixes. In the HTML, the column names are the main thing to notice here:
-
-```{r join-suffix-example}
-country_regions |>
-  left_join(
-    country_gdp,
-    join_by(iso3),
-    suffix = c("_regions", "_gdp")
-  ) |>
-  names()
-```
-
-Or, if one version is not needed, select it away before joining. This keeps the resulting data cleaner:
+The code is much less interesting than the question the join is answering. In a normal construction step, I would keep the main data on the left, remove duplicate label columns unless I need them, and then print a tiny diagnostic.
 
 ```{r clean-country-join-example}
-country_regions |>
-  left_join(
-    country_gdp |> select(-country_name),
-    join_by(iso3)
-  )
-```
-
-I would usually add a tiny diagnostic table after a join:
-
-```{r country-join-diagnostic-table}
-country_regions |>
-  summarise(
-    rows_before = n(),
-    rows_after = nrow(joined_country_regions),
-    missing_gdp = sum(is.na(joined_country_regions$gdp_b)),
-    unmatched_iso3 = nrow(anti_join(country_regions, country_gdp, join_by(iso3)))
-  )
-```
-
-The key points are that `left_join` and `inner_join` do not keep the same rows, country names are fragile join keys, and duplicate label columns should be handled deliberately rather than carried through the pipeline by accident.
-
-## Messages And Quick Checks
-
-One thing I have not done enough, but probably should, is adding a few short messages after important construction steps, to make mistakes easier to notice. Adding too many can make the code noisy, but after joins or aggregations they can be useful.
-
-For example, after a join it is often worth printing how many units matched, how many did not, and how many rows have missing values in the new variable. After a `summarise`, one could print how many rows were collapsed or how many groups have missing values. 
-
-```{r join-messages, message=TRUE}
 joined_country_regions <- country_regions |>
   left_join(
-    country_gdp |> 
-      select(-country_name),
-    join_by(iso3)
+    country_gdp |> select(-country_name),
+    join_by(iso3),
+    relationship = "one-to-one"
   )
 
-unmatched_country_regions <- country_regions |>
-  filter_out(iso3 %in% country_gdp$iso3)
-
-message(
-  n_distinct(country_regions$iso3) - nrow(unmatched_country_regions), " of ",
-  n_distinct(country_regions$iso3), " country-region units matched to GDP."
-)
-
-message(
-  nrow(unmatched_country_regions), " country-region units did not match to GDP."
-)
-
-message(
-  sum(is.na(joined_country_regions$gdp_b)), " rows have missing GDP after the join."
+tibble::tibble(
+  rows_before = nrow(country_regions),
+  rows_after = nrow(joined_country_regions),
+  missing_gdp = sum(is.na(joined_country_regions$gdp_b)),
+  master_only_iso3 = nrow(anti_join(country_regions, country_gdp, join_by(iso3))),
+  added_only_iso3 = nrow(anti_join(country_gdp, country_regions, join_by(iso3)))
 )
 ```
+
+Before trusting a join, I would usually check:
+
+- whether the key is unique on each side
+- whether the row count changed
+- whether any important rows failed to match
+- whether the new variables have unexpected missing values
+- whether duplicate label columns, such as `country_name.x` and `country_name.y`, appeared
+
+Joining by country name looks tempting, but it is fragile: "United States" and "United States of America" are the same place, but not the same string. ISO codes are usually better join keys, although they also need checks. The key habit is to treat joins as risky data construction steps, not as harmless plumbing.
 
 ## Aggregates
 
@@ -361,17 +336,11 @@ A lot of the analysis I have done was at the country level, or used countries as
 ## Country Identifiers
 Country names are useful for plots and tables, but they are often inconsistent across datasets. For example, "Ivory Coast" and "Cote d'Ivoire" may refer to the same country. For joins, it is usually better to rely on ISO codes, while keeping the names as labels.
 
-Even country codes need a quick check. For example:
-1) South Sudan's ISO3 is usually "SSD", but some datasets may use "SDS"
-2) Namibia's ISO2 is "NA", which can be confused with a missing value if the data is read carelessly
+That does not mean codes are magic. South Sudan may appear as `SSD` in one source and `SDS` in another; Namibia's ISO2 code is `NA`, which can be confused with missing data if the file is read carelessly. Aggregates, disputed areas, territories, historical countries, and source-specific codes still need checks.
 
- ISO codes are usually better than names, but still require some checks, given aggregates, disputed areas, territories, historical countries, and source-specific codes.
+For illustration, I use WDI population and GDP files downloaded as CSVs. The construction code is not the point here, so I would hide it in notes or in a script. The useful check is to convert ISO3 to ISO2, then inspect the rows that failed conversion.
 
-Normally the WDI includes data on aggregates (if you download directly with `WDI::WDI()`, use `extra = TRUE`). For illustration, however, I downloaded population and GDP from the WDI website as CSV files: https://data.worldbank.org/indicator/SP.POP.TOTL and https://data.worldbank.org/indicator/NY.GDP.MKTP.KD.
-
-The construction code is not the important part here. The useful habit is to build the panel, then immediately inspect which country codes did not behave like ordinary countries.
-
-```{r build-country-panel}
+```{r build-country-panel, include=FALSE}
 pop <- read_csv(here("data", "API_SP.POP.TOTL_DS2_en_csv_v2_33112.csv"), skip = 4) |>
   pivot_longer(
     cols = matches("^\\d{4}$"),
@@ -411,35 +380,51 @@ country_panel_all <- full_join(pop, gdp, join_by(iso3, country_name, year)) |>
   arrange(iso2, year)
 ```
 
-Here is the resulting panel:
+This WDI file includes rows that are not ordinary countries, such as regions and income groups. One quick diagnostic is to inspect the ISO3 codes that failed to convert to ISO2. Most failed conversions are aggregates, but this check also catches special cases that need manual handling, like Kosovo.
 
-```{r inspect-country-panel}
-head(country_panel_all)
-```
-
-This WDI file also includes rows that are not countries, such as regions or income groups. One quick diagnostic is to inspect the ISO3 codes that failed to convert to ISO2. Most failed conversions are aggregates, but this check also catches real places that need manual handling, like Kosovo.
-
-```{r list-unmatched-countries}
+```{r country-code-triage-data, include=FALSE}
 unmatched_iso3 <- country_panel_all |> 
   filter(is.na(iso2)) |> 
   distinct(iso3, country_name) |> 
   arrange(country_name)
 
-tibble::tibble(n_unmatched_iso3 = nrow(unmatched_iso3))
+country_code_triage <- tibble::tribble(
+  ~raw_name, ~iso3, ~converted_iso2, ~decision, ~why,
+  "United States", "USA", "US", "keep", "ordinary country",
+  "Kosovo", "XKX", NA_character_, "manual code XK", "special case",
+  "European Union", "EUU", NA_character_, "custom code EU", "aggregate",
+  "Low income", "LIC", NA_character_, "drop", "aggregate"
+)
 ```
 
-Rather than reading the whole unmatched list, I would inspect a few rows around the cases I care about:
+```{r country-code-triage-table, results='asis', echo=FALSE}
+triage_rows <- country_code_triage |>
+  mutate(
+    converted_iso2 = if_else(is.na(converted_iso2), "failed", converted_iso2),
+    row_class = if_else(converted_iso2 == "failed", "check-warn", "check-good")
+  )
 
-```{r inspect-unmatched-countries}
-kosovo_row <- which(unmatched_iso3$iso3 == "XKX")
-
-unmatched_iso3 |> 
-  slice(max(1, kosovo_row - 2):min(n(), kosovo_row + 2))
+cat(
+  '<table class="mini-table">',
+  '<thead><tr><th>Raw label</th><th>ISO3</th><th>ISO2 conversion</th><th>Decision</th><th>Why</th></tr></thead>',
+  '<tbody>',
+  paste0(
+    '<tr><td>', triage_rows$raw_name,
+    '</td><td><code>', triage_rows$iso3,
+    '</code></td><td class="', triage_rows$row_class, '"><code>', triage_rows$converted_iso2,
+    '</code></td><td>', triage_rows$decision,
+    '</td><td>', triage_rows$why,
+    '</td></tr>',
+    collapse = "\n"
+  ),
+  '</tbody></table>',
+  sep = "\n"
+)
 ```
 
-Thus, I'd manually add an ISO2 code for Kosovo. I also keep the EU as a custom aggregate because I want to use it later.
+The important thing is that Kosovo and the EU do not silently disappear. They are different kinds of exceptions, so they should get different decisions. Here I manually add `XK` for Kosovo and keep `EU` as a custom aggregate. The rest of the failed conversions are dropped from the country panel.
 
-```{r fix-country-codes}
+```{r fix-country-codes, class.source='fold-show'}
 country_panel <- country_panel_all |> 
   mutate(
     iso2 = case_when(
@@ -468,39 +453,78 @@ country_panel |>
 ```
 
 # Missing Values
-Assume that we have a dataset with some missing values:
-```{r make-na-example}
-na_df <- country_panel |>
-  filter(
-    iso2 %in% c("CU", "ER", "BO"), 
-    year %in% 2023:2025
-    ) |>
-  select(year, country_name, gdp_b) |> 
-  pivot_wider(
-    names_from = country_name,
-    values_from = c(gdp_b)
-  )
+Missing values can mean different things - the value was not collected, it was not applicable, it was suppressed, it failed to merge, or it is genuinely unknown. R will often show these as `NA`. `NaN` is the result of an undefined numeric operation, such as `0 / 0`. `NULL` usually means that the object is absent.
 
-na_df
+Here is a tiny GDP example. The shaded cells are missing. Suppose the task is to sum GDP over 2023-2025 for each country.
+
+```{r make-na-example, include=FALSE}
+na_df_long <- tibble::tribble(
+  ~country_name, ~year, ~gdp_b,
+  "Bolivia", 2023, 42.1,
+  "Bolivia", 2024, 43.0,
+  "Bolivia", 2025, NA_real_,
+  "Cuba", 2023, NA_real_,
+  "Cuba", 2024, NA_real_,
+  "Cuba", 2025, NA_real_,
+  "Eritrea", 2023, 2.3,
+  "Eritrea", 2024, NA_real_,
+  "Eritrea", 2025, 2.5
+)
+
+na_df <- na_df_long |>
+  pivot_wider(
+    names_from = year,
+    values_from = gdp_b
+  )
 ```
 
-Missing values can mean different things - the value was not collected, it was not applicable, it was suppressed, it failed to merge, or it is genuinely unknown. R will often show these as `NA`. `NaN` is the result of an undefined numeric operation, such as `0 / 0`. `NULL` usually means that the object is absent. 
-
-If we want to aggregate that data, the main options are 1) na.rm = TRUE, which removes the NAs before calculating, such that sum(df$x, na.rm = TRUE) would still return a value. For sums this can look like treating NA as 0, and if all values are NA it returns 0, but for means it also changes the denominator; 2) na.rm = FALSE, which forces the aggregation to have NA if any of the values is NA 
-
-Especially if we use a loop or across to aggregate over several variables or units, it can be a problem
-Say that we want to sum GDP, in billions, for each of those three countries in this period.  
-```{r compare-na-sums}
-na_df_long <- na_df |> 
-  pivot_longer(
-    -year,
-    names_to = "country_name",
-    values_to = "gdp_b"
+```{r missing-values-visual, results='asis', echo=FALSE}
+value_cells <- function(x) {
+  ifelse(
+    is.na(x),
+    '<td class="missing-cell">NA</td>',
+    paste0('<td class="observed-cell">', format(round(x, 1), nsmall = 1), '</td>')
   )
+}
 
+cat(
+  '<table class="mini-table">',
+  '<thead><tr><th>Country</th><th>2023</th><th>2024</th><th>2025</th></tr></thead>',
+  '<tbody>',
+  paste0(
+    '<tr><td>', na_df$country_name, '</td>',
+    value_cells(na_df$`2023`),
+    value_cells(na_df$`2024`),
+    value_cells(na_df$`2025`),
+    '</tr>',
+    collapse = "\n"
+  ),
+  '</tbody></table>',
+  sep = "\n"
+)
+```
+
+The main choices are:
+
+<div class="note-grid">
+<div class="note-card">
+<strong><code>na.rm = TRUE</code></strong>
+<p>Use the observed values. For sums, an all-missing country returns 0, which may be misleading.</p>
+</div>
+<div class="note-card">
+<strong><code>na.rm = FALSE</code></strong>
+<p>Return <code>NA</code> if any value is missing. This is strict, but can erase usable partial information.</p>
+</div>
+<div class="note-card">
+<strong>NA only if all missing</strong>
+<p>Use observed values when at least one exists, but keep fully missing countries as missing.</p>
+</div>
+</div>
+
+```{r compare-na-sums, include=FALSE}
 na_rm_options <- c("na.rm = TRUE", "na.rm = FALSE", "NA only if all missing")
 
-bind_rows(
+na_sum_comparison <- bind_rows(
   na_df_long |> 
     summarise(
       method = "na.rm = TRUE",
@@ -535,18 +559,39 @@ bind_rows(
   )
 ```
 
-so the table lets us see the three choices together: when we use na.rm = FALSE, a column that has values and NAs is always NA. But perhaps we are interested in preserving the NAs only in cases where all rows are NA. then, we need to modify the function. It is also often useful to show the amount of missingness itself. Otherwise, two columns can have the same sum while one of them is based on much less data.
+<div class="sum-focus">
+<p>The calculation below is a sum; the missing-value rule decides whether the total uses partial information, returns <code>NA</code>, or only returns <code>NA</code> when all years are missing.</p>
+</div>
 
-A small summary like this is often more useful than just calculating the aggregate:
+```{r missing-sum-comparison-table, results='asis', echo=FALSE}
+fmt_sum <- function(x) ifelse(is.na(x), "NA", format(round(x, 1), nsmall = 1))
 
-```{r missingness-summary-example}
-na_df_long |>
+cat(
+  '<table class="mini-table">',
+  '<thead><tr><th>Country</th><th>Observed years</th><th><code>na.rm = TRUE</code></th><th><code>na.rm = FALSE</code></th><th>NA only if all missing</th></tr></thead>',
+  '<tbody>',
+  paste0(
+    '<tr><td>', na_sum_comparison$country_name,
+    '</td><td>', na_sum_comparison$n_observed, ' of 3',
+    '</td><td>', fmt_sum(na_sum_comparison$`na.rm = TRUE`),
+    '</td><td>', fmt_sum(na_sum_comparison$`na.rm = FALSE`),
+    '</td><td>', fmt_sum(na_sum_comparison$`NA only if all missing`),
+    '</td></tr>',
+    collapse = "\n"
+  ),
+  '</tbody></table>',
+  sep = "\n"
+)
+```
+
+The useful habit is to choose the rule deliberately and show the amount of missingness next to the aggregate. Otherwise, two totals can look equally solid even when one is based on much less data.
+
+```{r missing-values-pattern, eval=FALSE, class.source='fold-show'}
+df |>
   summarise(
-    n_rows = n(),
-    n_missing = sum(is.na(gdp_b)),
-    n_observed = sum(!is.na(gdp_b)),
-    share_missing = n_missing / n_rows,
-    .by = country_name
+    total = if (all(is.na(x))) NA_real_ else sum(x, na.rm = TRUE),
+    n_observed = sum(!is.na(x)),
+    .by = group
   )
 ```
 
@@ -1147,23 +1192,89 @@ to be added
 
 A lot of mistakes are much easier to catch immediately after the step that created them. I would usually run some checks after important joins, aggregations, spatial matches, and output construction, rather than only looking at the final regression table or figure.
 
-Useful checks:
+## Messages And Quick Checks
 
-- row and column counts before and after
-- duplicate keys before joins
-- unmatched observations after joins
-- row multiplication after joins, meaning that the join created more rows than expected because one or both datasets had repeated keys
-- missingness summaries for new variables - similarly with zeros (where zeros indicate a potential problem)
-- impossible or implausible values
-- extreme values
-- edge cases and specific examples
-- graphs, especially over time or on maps
-- compare values, when possible, to an external source (e.g., after cleaning WB data and merging countries, if unsure - check IMF or publications online and see if the values are reasonably close)
-- inspect some random rows
+One thing I have not done enough, but probably should, is adding a few short messages after important construction steps, to make mistakes easier to notice. Adding too many can make the code noisy, but after joins, aggregations, spatial matches, or output construction, one or two checks can save a lot of confusion later.
+
+<div class="note-grid">
+<div class="note-card">
+<strong>After a join</strong>
+<p>Did rows multiply? Which keys failed to match? Did new variables become missing?</p>
+</div>
+<div class="note-card">
+<strong>After an aggregation</strong>
+<p>How many rows were collapsed? How many groups have missing or zero values?</p>
+</div>
+<div class="note-card">
+<strong>After an output step</strong>
+<p>Was the expected file created? How many rows or features did it contain?</p>
+</div>
+</div>
+
+```{r join-messages, message=TRUE}
+joined_country_regions <- country_regions |>
+  left_join(
+    country_gdp |> 
+      select(-country_name),
+    join_by(iso3)
+  )
+
+unmatched_country_regions <- country_regions |>
+  filter_out(iso3 %in% country_gdp$iso3)
+
+message(
+  n_distinct(country_regions$iso3) - nrow(unmatched_country_regions), " of ",
+  n_distinct(country_regions$iso3), " country-region units matched to GDP."
+)
+
+message(
+  nrow(unmatched_country_regions), " country-region units did not match to GDP."
+)
+
+message(
+  sum(is.na(joined_country_regions$gdp_b)), " rows have missing GDP after the join."
+)
+```
+
+This is deliberately a bit plain. A good message is usually boring, specific, and close to the step that could have gone wrong.
+
+## Checks After Risky Steps
+
+I would think of this as a small checklist after risky steps, not as a separate validation project:
+
+<table class="mini-table">
+<thead>
+<tr><th>After this step</th><th>Useful quick check</th><th>Useful message</th></tr>
+</thead>
+<tbody>
+<tr>
+<td>Join</td>
+<td>Row counts before and after; duplicate keys; unmatched keys; missingness in new variables.</td>
+<td><code>247 of 250 country-year rows matched; 3 unmatched ISO3 codes.</code></td>
+</tr>
+<tr>
+<td>Aggregation</td>
+<td>Rows collapsed per group; groups with all missing inputs; unexpected zeros or extreme totals.</td>
+<td><code>Collapsed 12,500 rows to 250 groups; 4 groups have all-missing GDP.</code></td>
+</tr>
+<tr>
+<td>Spatial match</td>
+<td>Unmatched points or polygons; multiple matches; a quick map of matched and unmatched units.</td>
+<td><code>98.6% of points matched to an admin unit; 42 points unmatched.</code></td>
+</tr>
+<tr>
+<td>Output construction</td>
+<td>Expected file exists; row count, column count, CRS, and key variables are present.</td>
+<td><code>Wrote final_country_panel.rds with 5,250 rows and 37 columns.</code></td>
+</tr>
+</tbody>
+</table>
+
+Other useful checks are boring but effective: impossible values, edge cases, specific examples, random rows, plots over time or on maps, and comparisons to an external source when possible. For example, after cleaning World Bank data and merging countries, if the values look odd, I would check IMF, Eurostat, or a publication and see whether the magnitude is reasonably close.
 
 Before sending results, I would usually rerun the relevant script from a clean session and check that the expected outputs were recreated. If something looks odd but is probably fine, it is still worth mentioning it briefly rather than letting the next person rediscover it.
 
-For example, after adding GDP to a country-region file, I might run something like this before trusting the join:
+One compact check after a join might look like this:
 
 ```{r join-validation-example}
 join_check <- country_regions |>
@@ -1178,21 +1289,69 @@ tibble::tibble(
   unmatched_iso3 = nrow(anti_join(country_regions, country_gdp, join_by(iso3))),
   missing_gdp = sum(is.na(join_check$gdp_b))
 )
-
-anti_join(country_regions, country_gdp, join_by(iso3))
 ```
 
 # Constructing Workflows
 
-I prefer working inside an R project, which makes relative paths more stable. Functions like `here::here()` are useful for referring files from the project root.
+I prefer working inside an R project, which makes relative paths more stable. Functions like `here::here()` are useful for referring to files from the project root, instead of relying on whatever folder happens to be active.
 
-I like organising both code and data in raw, intermediate/build, and final/output folders. raw data should usually be kept as close as possible to the original files, intermediate data should be the products of construction steps, and final/output data should be the version that is actually used for analysis, tables, or figures. This makes it easier to know what can be recreated and what should not be manually edited.
+A simple project structure is usually enough:
 
-For code, I usually prefer numbered scripts or folders when there is a logical order, for example `01_import`, `02_clean`, `03_construct`, `04_analysis`. 
+<table class="mini-table">
+<thead>
+<tr><th>Folder or file</th><th>What goes there</th><th>Rule of thumb</th></tr>
+</thead>
+<tbody>
+<tr>
+<td><code>data/raw/</code></td>
+<td>Original downloads, exports, shapefiles, survey files.</td>
+<td>Keep close to the original. Do not edit by hand.</td>
+</tr>
+<tr>
+<td><code>data/intermediate/</code></td>
+<td>Cleaned or partially constructed files.</td>
+<td>Useful when a step is slow or shared across scripts.</td>
+</tr>
+<tr>
+<td><code>data/final/</code></td>
+<td>Analysis-ready datasets.</td>
+<td>These should be recreated from scripts, not patched manually.</td>
+</tr>
+<tr>
+<td><code>R/</code> or numbered scripts</td>
+<td><code>01_import</code>, <code>02_clean</code>, <code>03_construct</code>, <code>04_analysis</code>.</td>
+<td>Use names that show the order and purpose.</td>
+</tr>
+<tr>
+<td><code>output/</code></td>
+<td>Tables, figures, maps, model objects, reports.</td>
+<td>Use clear names; avoid unexplained versions of the same thing.</td>
+</tr>
+</tbody>
+</table>
 
-If some construction steps are slow, it can be worth saving intermediate outputs and reusing them, but I would give them clear names and avoid keeping several unexplained versions of the same file.
+The workflow I want is boring in a good way:
 
-Version control (usually git, and often GitHub) is extremely useful. In projects with many authors, it can help deal with conflicts and make it clearer who changed what; but even for a project that only you work on, it is recommended, for tracking changes over time and reverting them more easily. I would usually make small commits with messages that explain the change, and use branches or pull requests when the project has several people or when a change is risky. For (especially heavy) data files, outputs that are repeatedly generated with different names (e.g., results_\{date\}) or private files, should go in `.gitignore` and not be tracked.
+<div class="note-grid">
+<div class="note-card">
+<strong>Import</strong>
+<p>Read raw files, keep source names, and do only minimal parsing.</p>
+</div>
+<div class="note-card">
+<strong>Construct</strong>
+<p>Clean keys, join sources, make derived variables, and save checks near risky steps.</p>
+</div>
+<div class="note-card">
+<strong>Analyze</strong>
+<p>Start from the final constructed data, not from a half-edited object in the environment.</p>
+</div>
+<div class="note-card">
+<strong>Send</strong>
+<p>Rerun from a clean session and make sure the expected files were recreated.</p>
+</div>
+</div>
+
+Version control, usually git and often GitHub, is also useful. I would usually make small commits with messages that explain the change, and use branches or pull requests when the project has several people or when a change is risky. Heavy data files, repeated generated outputs, and private files should usually go in `.gitignore`.
 
 For reproducibility, I would keep the seed discussion near the code that actually uses randomness. Fixed seeds (e.g., `set.seed(123)`) are deterministic - see [this blog post](https://blog.genesmindsmachines.com/p/if-your-random-seed-is-42-i-will). One option is to generate a seed once, record it, and then keep using that same seed throughout the project.
 
@@ -1212,14 +1371,42 @@ When handing work to someone else, I would usually include a short note rather t
 
 ## Definitions And Units
 
-Pay attention to the definition and the units. `gdp` could mean nominal GDP in current local currency, nominal GDP in current US dollars, real GDP in constant 2015 US dollars, or PPP-adjusted GDP, while `gdp_pc` also depends on the population denominator. Different definitions have different meanings (and often, differences in the number of missing values).
+Pay attention to the definition and the units. `gdp` could mean nominal GDP in current local currency, nominal GDP in current US dollars, real GDP in constant 2015 US dollars, or PPP-adjusted GDP. The same short variable name can hide a very different quantity.
 
-For example, using the WDI variables above, `gdp_b` is GDP in billions of constant 2015 US dollars, `pop_m` is population in millions, and `gdp_pc = gdp_b * 1000 / pop_m` gives GDP per person in dollars. That is not the same as GDP per capita in current dollars, local currency, or PPP-adjusted terms, and those differences can matter a lot for comparisons across countries and over time.
+For example, in the WDI variables above, `gdp_b` is GDP in billions of constant 2015 US dollars, `pop_m` is population in millions, and `gdp_pc = gdp_b * 1000 / pop_m` gives GDP per person in dollars. That is not the same as GDP per capita in current dollars, local currency, or PPP-adjusted terms.
 
-Even with the existing data, using total GDP or GDP per capita can imply a very different analysis. Total GDP is partly a size variable, while GDP per capita is closer to an income/productivity measure:
+<table class="mini-table">
+<thead>
+<tr><th>Variable</th><th>What it means here</th><th>Common mistake</th></tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gdp_b</code></td>
+<td>Total GDP, billions of constant 2015 US dollars.</td>
+<td>Treating it as current dollars, local currency, or per-person income.</td>
+</tr>
+<tr>
+<td><code>pop_m</code></td>
+<td>Population, millions of people.</td>
+<td>Forgetting the scale when calculating per-capita values.</td>
+</tr>
+<tr>
+<td><code>gdp_pc</code></td>
+<td><code>gdp_b * 1000 / pop_m</code>, dollars per person.</td>
+<td>Comparing it to PPP-adjusted or current-dollar GDP per capita.</td>
+</tr>
+<tr>
+<td><code>log(gdp_pc)</code></td>
+<td>Log of GDP per person.</td>
+<td>Logging before checking zeros, units, or tiny values.</td>
+</tr>
+</tbody>
+</table>
 
-```{r compare-gdp-definitions}
-country_panel |>
+Even with the same source data, total GDP and GDP per capita point to different kinds of questions. Total GDP is partly a size variable, while GDP per capita is closer to an income or productivity measure:
+
+```{r compare-gdp-definitions, include=FALSE}
+gdp_definition_check <- country_panel |>
   filter(year == 2024) |>
   mutate(
     gdp_pc = gdp_b * 1000 / pop_m,
@@ -1230,6 +1417,30 @@ country_panel |>
     cor_gdp_pc_pop = cor(gdp_pc, pop_m, use = "complete.obs"),
     cor_log_gdp_pc_pop = cor(log_gdp_pc, pop_m, use = "complete.obs")
   )
+```
+
+```{r gdp-definition-comparison-table, results='asis', echo=FALSE}
+definition_rows <- tibble::tribble(
+  ~comparison, ~interpretation, ~correlation,
+  "Total GDP and population", "Large countries tend to have larger economies.", gdp_definition_check$cor_gdp_pop,
+  "GDP per capita and population", "Now the variable is much less about country size.", gdp_definition_check$cor_gdp_pc_pop,
+  "Log GDP per capita and population", "The scale changed again, so check what the model will mean.", gdp_definition_check$cor_log_gdp_pc_pop
+)
+
+cat(
+  '<table class="mini-table">',
+  '<thead><tr><th>Comparison</th><th>What to notice</th><th>Correlation with population</th></tr></thead>',
+  '<tbody>',
+  paste0(
+    '<tr><td>', definition_rows$comparison,
+    '</td><td>', definition_rows$interpretation,
+    '</td><td>', round(definition_rows$correlation, 2),
+    '</td></tr>',
+    collapse = "\n"
+  ),
+  '</tbody></table>',
+  sep = "\n"
+)
 ```
 
 If using `log()`, check the values and units first. Logging GDP in dollars is not the same as logging GDP in millions, and logging very small values can produce numbers that are technically correct but not very meaningful. 
