@@ -19,11 +19,13 @@ this wouldnt speak much about measurement issues in datasets
 ```{r load-packages}
 pacman::p_load(
   dplyr, labelled, sjlabelled, tidyr, ggplot2, scales, sf,
-  here, readr, dtplyr, duckdb, DBI
+  here, readr, dtplyr, duckdb, DBI, rnaturalearth
   )
 
 options(scipen = 999)
 ```
+
+maybe say something about whether the code should be aimed at humans or ai - recommend something that is at least readable and debuggable by humans, even if not the cleanest. maybe use some example of a way that ai would write a code 'efficiently' vs humans - perhaps loop is a good example? or even just the number of messages etc
 
 # Working in R
 
@@ -168,7 +170,7 @@ Another example is `copy_labels`, which exists in both `sjlabelled` and `labelle
 
 ## Joins
 
-Quite often we want to join datasets, using one or more common keys. The main questions are which rows should stay, how to treat units that do not match, whether the key is actually unique, whether the keys are written consistently across datasets, and what to do when both datasets contain columns with the same name.
+Quite often we want to join datasets, using one or more common keys. Consider which rows should stay, how to treat units that do not match, whether the key is unique, whether the keys are consistent across datasets, and what to do when both datasets contain columns with the same name.
 
 There are four common types of joins:
 
@@ -190,7 +192,7 @@ Another consideration is the relationship between the keys:
 | one-to-many | one row in the main data matches many rows in the added data | one country joined to several yearly rows |
 | many-to-many | keys repeat on both sides | usually risky unless explicitly intended |
 
-It is worth checking what the key actually mean. Sometimes it should be one row per country-year, but in practice there are duplicates, aggregates, or several rows for the same unit. The default in `dplyr` is  `relationship = NULL` which does not enforce a relationship, but does give a warning for many-to-many join that was not stated as such. If we know what the relationship should be, it can be useful to state it explicitly, for example `relationship = "many-to-one"`, so the code fails when the data do not match the assumption.
+The default in `dplyr` is  `relationship = NULL` which does not enforce a relationship, but gives a warning for many-to-many join that was not stated as such. If we know what the relationship should be, it can be useful to state it explicitly, for example `relationship = "many-to-one"`, so the code fails when the data do not match the assumption.
 
 Another common issue is conflicting columns. If both datasets have `country` and `country_name`, for example, and we join on `country` only, then R may create columns such as `country_name.x` and `country_name.y`. That is sometimes useful for checking differences across sources, but usually it is cleaner to either use explicit suffixes or select away the unnecessary version before joining.
 
@@ -249,9 +251,9 @@ In this example, joining by country name is problematic because the United State
 
 ## Messages and quick checks
 
-- discuss adding messages after important data construction steps
-- discuss reporting how many units joined, did not join, or have missing values after a join
-- discuss reporting how many units were aggregated, how many rows were collapsed, or how many groups have missing values after `summarise`
+One thing I have not done enough, but probably should, is adding a few short messages after important construction steps, to make mistakes easier to notice. Adding too many can make the code noisy, but after joins or aggregations they can be useful.
+
+For example, after a join it is often worth printing how many units matched, how many did not, and how many rows have missing values in the new variable. After a `summarise`, one could print how many rows were collapsed or how many groups have missing values. 
 
 ```{r join-messages, message=TRUE}
 joined_country_regions <- country_regions |>
@@ -262,7 +264,7 @@ joined_country_regions <- country_regions |>
   )
 
 unmatched_country_regions <- country_regions |>
-  filter(!iso3 %in% country_gdp$iso3)
+  filter_out(iso3 %in% country_gdp$iso3)
 
 message(
   n_distinct(country_regions$iso3) - nrow(unmatched_country_regions), " of ",
@@ -485,8 +487,20 @@ bind_rows(
 so the table lets us see the three choices together: when we use na.rm = FALSE, a column that has values and NAs is always NA. But perhaps we are interested in preserving the NAs only in cases where all rows are NA. then, we need to modify the function. It is also often useful to show the amount of missingness itself. Otherwise, two columns can have the same sum while one of them is based on much less data.
 
 # Plotting
-There are much better guides than whatever I'll write, but some important things - 
-a) axis titles are almost always unnecessary, unreadable, ugly and distracting (especially y axis titles). The same information can usually be conveyed using the main plot title
+
+Plots are great. I mainly use them for two, somewhat different purposes - inspecting the data and presenting results. Graphs can highlight weird data spikes, missing or implausible values, certain units driving the results in a (much) clearer way than summary tables. 
+When presenting results, we want the readers to understand the main message, ideally without working too hard.
+To me, graphs in economic papers tend to be quite bad in serving the latter goal; they're often ugly, too busy and hard to understand (whether it's due to lack of information, to low priorities to visualiations, to standartization of those types of graphs or anything else is a differnet question). That is sometimes necessary, especially for readers who want to inspect the details, but often the graph becomes less useful because of it.
+
+There are much better guides than whatever I will write here. I really like [Saloni Dattani's guide](https://www.scientificdiscovery.dev/p/salonis-guide-to-data-visualization).
+
+One should consider which type of graph would be useful. I think that line plots are suitable for most cases, especially for changes over time, especially with a small number of series or when some series need to be highlighted. Bar plots can work well for comparing categories, if there are not too many of them; while stacked bars (or areas) can be nice at times but can be hard to read unless the question is really about the total, the first category in the stack, or categories that undertook massive changes. Pie charts should be avoided for similar reasons (but much harder to read)
+
+The [R Graph Gallery](https://r-graph-gallery.com/) is also a nice source for examples.
+
+Some things to consider:
+
+Axis titles, especially y axis titles, are often unnecessary, hard to read, and distracting. The same information can usually be conveyed using the main plot title. Very often, the x axis indicates time, which means that indicating the unit is unnecessary, though it still appears on many graphs in economics papers.
 
 ```{r plot-gdp-pc-raw}
 eu27_countries <- c(
@@ -525,7 +539,7 @@ plot_df |>
   labs(title = "GDP per capita across EU countries")
 ```
 
-The legend can also often be avoided by placing the labels directly near the lines. The plot can also benefit from clearer colours (that are more colour-blind friendly). Say that we want to focus on Ireland's rise from Sweden's level of GDP per capita to nearly Luxembourg's, then these could be higlighted with the other EU countries having grey :
+The legend can also often be avoided by placing the labels directly near the lines. Wouldn't always work (generally useful if there aren't many categories), but it's sometimes useful. The plot can also benefit from clearer colours (that are more colour-blind friendly). Say that we want to focus on Ireland's rise from Sweden's level of GDP per capita to nearly Luxembourg's, then these could be higlighted with the other EU countries having grey :
 
 ```{r plot-gdp-pc-highlighted}
 plot_colors <- c(
@@ -605,12 +619,19 @@ plot_df |>
 
 Another useful AI trick is to ask it to follow a specific visualization guide rather than asking for a "better plot" in general. For example, one could ask for suggestions inspired by the *Financial Times* visual vocabulary, the Urban Institute data visualization style guide, or the Datawrapper/Flourish style of direct labeling and restrained annotation.
 
-
 # Spatial Analysis
 
-A note (that I quite often ignore) - gpkg is recommended over shapefile [why]
+Quite a lot of the analysis I have done is related to spatial data, so I include a few practical notes here.
 
-### What to use
+There are two main types of spatial datasets. Vector data includes discrete geometries, such as points, lines, and polygons. Raster data stores values in grid cells. 
+
+Note that vector data is often saved as shapefiles. Shapefiles are split across several files (`.shp`, `.shx`, `.dbf`, etc.), have short column-name limits, do not handle mixed geometry types well, and are not especially efficient. **`gpkg` is often preferable**: it is one file, handles longer column names, can store multiple layers, and is usually easier to move around.
+
+**For raster data, I would usually use `terra`** in R. Raster data is often saved as `.tif`, especially for ordinary gridded layers. Another common format is `.nc` or NetCDF, which is often used for climate or other data with several dimensions. In R, I would usually try `terra::rast()` first for both `.tif` and `.nc` files. If the NetCDF file has many variables or time layers, it is worth checking the layer names after reading it and selecting the variable or band we actually need.
+
+**For vector data, I would usually use `sf`** in R. `sf::read_sf()` and `sf::write_sf()` are usually convenient wrappers around `st_read()` and `st_write()`, so I would use them most of the time (especially when reading a file with one obvious layer). 
+
+## Which tool to use
 
 For me, there are mainly three types of tools that are useful in spatial analysis.
 
@@ -634,11 +655,183 @@ If there is one set of units that will be used across multiple scripts, I would 
 
 I would pay attention to boundary datasets that AIs tend to suggest, such as `FAO/GAUL/2015/level0`. They can be useful, but if we later group by ISO3 or compare to country-level data, some territories or administrative units may need to be merged first. In those cases it can be better to have a separate GEE script that cleans the boundary file, matches names (e.g., to ISO3), merges territories that should belong to the same unit, and exports the result as a reusable GEE asset. Then the analysis scripts can call that asset.
 
-### spatial matching
+## Spatial matching
 
-discuss here how to intersect between spatial data and some of the relevant considerations (whether technical - st_intersection vs st_nearest_feature, but also raster vs vector, what do to in cases of multiple intersections etc)
+A unit may intersect several polygons, a point may fall just outside a boundary because the datasets use slightly different borders, or a raster cell may only partly overlap the polygon. In those cases we need to decide whether to keep all matches, use the largest overlap, weight by area or population, use the nearest feature, or drop ambiguous cases. Whatever choice is made, it is worth saving a few examples and plotting them.
 
-### polygons vs points
+I think it is useful to separate the cases, because the main mistakes differ:
+
+| Match type | Common tools | Main question |
+|---|---|---|
+| point to polygon | `st_join(..., join = st_within)` | which unit contains each point? | 
+| polygon to polygon | `st_intersection()` | which areas overlap, and by how much? |
+| nearest vector match | `st_nearest_feature()`, `nngeo::st_nn()` | which feature is closest when there is no exact match? |
+| raster to polygon | `terra::extract()` | how should grid-cell values be summarized within each polygon? |
+
+For point-to-polygon matching, I would usually use `st_join(points, polygons, join = st_within)`, which attaches the polygon attributes to each point that falls inside a polygon. After this, I would check unmatched points.
+
+For polygon-to-polygon matching, note that there are two `sf` functions with similar names: `st_intersects()` and `st_intersection()`. `st_intersection()` returns a new spatial dataset whose rows are the overlapping pieces. For example, if one country overlaps three ecological zones, the result can have three rows for that country, each with a smaller geometry and attributes from both the country layer and the ecological-zone layer. This is useful when we need to calculate overlap areas or area-weighted variables. `st_intersects()` only tells us which geometries touch or overlap, so it can be useful as a quicker diagnostic, or as a first filtering step before running a heavier `st_intersection()`.
+
+Nearest-feature matching can be useful for vector data when there is no exact match. `st_nearest_feature()` gives the single nearest feature, while `nngeo::st_nn()` is useful when we want several nearest neighbors, or when we only want matches within a given distance. For example, we might match a mine to the nearest road, but only if the road is within 10 km.
+
+For raster-to-polygon matching, the question is usually how to summarize cells inside each polygon. For example, if we have a population raster and administrative units, we may want total population in each unit. If we have a temperature raster, we may want the mean. 
+Pay attention to partial overlaps, as a cell may sit partly inside a polygon and partly outside it. In `terra::extract()`, the default does not return cell fractions; it extracts the selected raster cells and applies the function we ask for, such as `mean` or `sum`. Setting `weights = TRUE` returns approximate fractions of cells covered by the polygon, while `exact = TRUE` is more precise but slower. Those fractions are not always the right choice, but they can be useful. For example, for population we might sum `population * fraction`, while for temperature we might calculate a weighted mean.
+
+## creating visualizations
+
+For maps in R, `ggplot2` with `geom_sf()` is usually enough. A choropleth map usually needs two inputs: boundaries and a variable to color each area.
+
+The example below is useful because it first highlights a bug. If we join by ISO2, France is not matched because the `rnaturalearth` file uses `-99` as its ISO2 code. That is exactly the kind of problem maps can help catch quickly.
+```{r map-eu-gdp-pc, message=FALSE}
+eu_gdp_2024 <- country_panel |>
+  filter(year == 2024, iso2 %in% eu27_countries) |>
+  mutate(gdp_pc = gdp_b * 1000 / pop_m) |>
+  select(iso2, iso3, gdp_pc)
+
+europe_boundaries <- rnaturalearth::ne_countries(
+  scale = "small",
+  returnclass = "sf"
+) |> 
+  select(iso2 = iso_a2, iso3 = adm0_a3, continent, geometry) |>
+  filter(continent == "Europe")
+
+bad_iso2_map <- europe_boundaries |>
+  mutate(in_eu = iso2 %in% eu27_countries) |>
+  left_join(
+    eu_gdp_2024 |> select(iso2, gdp_pc),
+    join_by(iso2)
+  )
+
+bad_iso2_map |>
+  filter(iso3 %in% c("FRA", "DEU", "ESP")) |>
+  st_drop_geometry() |>
+  select(iso2_boundary = iso2, iso3, in_eu, gdp_pc)
+
+bad_iso2_map |>
+  ggplot() +
+  geom_sf(fill = "#d9d9d9", color = "white", linewidth = 0.12) +
+  geom_sf(
+    data = bad_iso2_map |> filter(in_eu),
+    aes(fill = gdp_pc),
+    color = "white",
+    linewidth = 0.12
+  ) +
+  scale_fill_viridis_c(
+    labels = label_number(scale = 1 / 1000, suffix = "k"),
+    na.value = "#eeeeee",
+    guide = guide_colorbar(
+      title = NULL,
+      barwidth = grid::unit(160, "pt"),
+      barheight = grid::unit(8, "pt"),
+      label.position = "bottom"
+    )
+  ) +
+  coord_sf(xlim = c(-12, 35), ylim = c(34, 72), expand = FALSE) +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold"),
+    plot.caption = element_text(color = "#6b7280")
+  ) +
+  labs(
+    title = "GDP per capita across EU countries",
+    subtitle = "Reveals a bad join: France is not merged",
+    caption = "Source: The World Bank"
+  )
+```
+
+The fix is to join by ISO3. For the final display, I would also usually consider binning the values rather than using a continuous color scale, with the bins depending on the comparison we want to make. The first version below keeps a wide top category, which is useful for separating poorer, middle, rich, and very rich countries. The second version uses the same palette but compresses the top and gives more detail in the middle and bottom. 
+```{r map-eu-gdp-pc-fixed, message=FALSE}
+eu_gdp_map <- europe_boundaries |>
+  mutate(in_eu = iso3 %in% eu_gdp_2024$iso3) |>
+  left_join(
+    eu_gdp_2024 |> select(iso3, gdp_pc),
+    join_by(iso3)
+  ) |>
+  mutate(
+    gdp_pc_group_wide = cut(
+      gdp_pc,
+      breaks = c(0, 20000, 35000, 50000, 70000, Inf),
+      labels = c("<$20k", "$20k-$35k", "$35k-$50k", "$50k-$70k", "$70k+"),
+      right = FALSE
+    ),
+    gdp_pc_group_middle = cut(
+      gdp_pc,
+      breaks = c(0, 10000, 15000, 20000, 30000, 40000, Inf),
+      labels = c("<$10k", "$10k-$15k", "$15k-$20k", "$20k-$30k", "$30k-$40k", "$40k+"),
+      right = FALSE
+    )
+  )
+
+eu_gdp_map |>
+  ggplot() +
+  geom_sf(fill = "#d9d9d9", color = "white", linewidth = 0.12) +
+  geom_sf(
+    data = eu_gdp_map |> filter(in_eu),
+    aes(fill = gdp_pc_group_wide),
+    color = "white",
+    linewidth = 0.12
+  ) +
+  scale_fill_manual(
+    values = c(
+      "<$20k" = "#edf8fb",
+      "$20k-$35k" = "#b2e2e2",
+      "$35k-$50k" = "#66c2a4",
+      "$50k-$70k" = "#2ca25f",
+      "$70k+" = "#006d2c"
+    ),
+    na.value = "#eeeeee",
+    name = NULL
+  ) +
+  coord_sf(xlim = c(-12, 35), ylim = c(34, 72), expand = FALSE) +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold"),
+    plot.caption = element_text(color = "#6b7280")
+  ) +
+  labs(
+    title = "GDP per capita across EU countries",
+    subtitle = "Constant 2015 US dollars, not PPP-adjusted",
+    caption = "Source: The World Bank"
+  )
+
+eu_gdp_map |>
+  ggplot() +
+  geom_sf(fill = "#d9d9d9", color = "white", linewidth = 0.12) +
+  geom_sf(
+    data = eu_gdp_map |> filter(in_eu),
+    aes(fill = gdp_pc_group_middle),
+    color = "white",
+    linewidth = 0.12
+  ) +
+  scale_fill_manual(
+    values = c(
+      "<$10k" = "#edf8fb",
+      "$10k-$15k" = "#ccece6",
+      "$15k-$20k" = "#99d8c9",
+      "$20k-$30k" = "#66c2a4",
+      "$30k-$40k" = "#2ca25f",
+      "$40k+" = "#006d2c"
+    ),
+    na.value = "#eeeeee",
+    name = NULL
+  ) +
+  coord_sf(xlim = c(-12, 35), ylim = c(34, 72), expand = FALSE) +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold"),
+    plot.caption = element_text(color = "#6b7280")
+  ) +
+  labs(
+    title = "GDP per capita across EU countries",
+    subtitle = "Same palette, narrower bins",
+    caption = "Source: The World Bank"
+  )
+```
+
+## finding representative points of a polygons
 sometimes we may want to work with single points in a given unit, rather than the full polygon. that's especially the case if 1) the analysis is very heavy (e.g., calculating road path from unit x to y); 2) we are interested in the role of specific areas within the unit (e.g., the main city), 3) fill
 if we chooes to use points, how do we select the point? it depends obviously on what we want to achieve.
 centroid is a popular solution, but it suffers from various drawbacks. 
@@ -697,8 +890,7 @@ bind_rows(centroids, surface_points) |>
 ```
 
 - what about population-weighted centroid? we can use data like GHS-POP to do it (recommended to do it in GEE). However, 1) it might still be outside of the unit, 2) say that there are several population centres in different areas. the pop-weighted centroid is probably going to be between them, which might be good but it'll likely reflect a (relatively) remote point. which might be fine but not always!
-
-```{r plot-population-centroid-points, echo=FALSE}
+```{r plot-population-centroid-points, echo=FALSE, fig.width=6, fig.height=4}
 population_unit <- st_sf(
   geometry = st_sfc(normal_polygon)
 )
@@ -782,12 +974,12 @@ ggplot() +
   geom_sf(
     data = population_summary_points,
     aes(color = point_type),
-    size = 3.4
+    size = 3
   ) +
   geom_label(
     data = population_summary_labels,
     aes(x = label_x, y = label_y, label = point_type),
-    size = 2.8,
+    size = 3.1,
     linewidth = 0.15,
     label.padding = unit(0.08, "lines")
   ) +
@@ -797,11 +989,11 @@ ggplot() +
       "centroid" = "#D55E00",
       "point on surface" = "#0072B2",
       "population-weighted centroid" = "#009E73",
-      "highest population cell" = "black"
+      "highest population cell" = "#00BFC4"
     )
   ) +
   coord_sf(datum = NA, expand = TRUE) +
-  theme_minimal() +
+  theme_minimal(base_size = 12) +
   theme(
     axis.title = element_blank(),
     axis.text = element_blank(),
@@ -813,12 +1005,15 @@ ggplot() +
 - similarly to the last suggestion, can use 'the most populated point'. for certain things it might be preferable (for others, not as much). one thing to consider here, as many spatial analysis, is the resolution. the most populated 100m place in a country could theoretically be a small town that has an extremely dense point. so aggregating by 1/5/10km might be preferable, but examine the outputs and see whether this captures what you're interested in
 
 ### finding a 'representative' category
-there are various spatial datasets that might involve finding some balance between various categories. mines datasets, for example, sometimes have each individual mine as a row, or would have a value of 'suitability for a given commodity' per cell. depends on what we want to have, we might want to aggregate the data per unit. should we sum the number of distinct mines? use the commodity with the highest value of suitability? no obvious answer here but worth thinking about those...
+there are various spatial datasets that might involve finding some balance between various categories. mines datasets, for example, sometimes have each individual mine as a row, or would have a value of 'suitability for a given commodity' per cell. depends on what we want to have, we might want to aggregate the data per unit. should we sum the number of distinct mines? use the commodity with the highest value of suitability? count whether any mine of each type exists? There is no obvious answer here. The right choice depends on whether the variable is meant to capture abundance, dominance, exposure, or just the presence of something.
 
 # Analysis
-log() of low numbers is pretty useless. not unknown, but worth paying attention to
+
+small note - if using `log()`, check the values and units first. Logging GDP in dollars is not the same as logging GDP in millions, and logging very small values can produce numbers that are technically correct but not very meaningful. 
 
 ## shift share
+
+to be added
 
 # Debugging and validating results
 
@@ -843,7 +1038,7 @@ Version control (usually git) is extremely useful. In projects with many authors
 
 For reproducibility, I would keep the seed discussion near the code that actually uses randomness. `set.seed(123)` is deterministic, like any other fixed seed; it is not more random because the number is familiar. If there is no reason to use a specific seed, one option is to randomly generate a seed once, record it, and then keep using that same seed throughout the project.
 
-Before sending results, I would at least rerun the relevant scripts from a clean session and check the main outputs: row counts, duplicate keys, unmatched observations, summary statistics, missing values, and zeros where zeros may indicate a construction problem.
+Before sending results, I would rerun the relevant scripts from a clean session and check the main outputs. At minimum, this usually means row counts, duplicate keys, unmatched observations, summary statistics, missing values, and zeros in places where zeros may indicate a construction problem.
 
 ## Handoff notes
 
