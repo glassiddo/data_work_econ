@@ -1,8 +1,4 @@
 *
-!*/
 !.gitignore
-!CONTEXT.md
-!README.md
+!ra_lessons.html
 !ra_lessons.Rmd
-!styles.css
-.Rproj.user
