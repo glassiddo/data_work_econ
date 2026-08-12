@@ -33,7 +33,7 @@ h3 {
 }
 
 .join-input-row {
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-template-columns: repeat(2, minmax(230px, 1fr));
 }
 
 .join-output-row {
@@ -57,6 +57,7 @@ h3 {
   width: 100%;
   margin: 0;
   font-size: 14px;
+  table-layout: fixed;
 }
 
 .join-panel p {
@@ -69,6 +70,21 @@ h3 {
 .join-panel td {
   padding: 5px 6px;
   vertical-align: top;
+}
+
+.join-panel th {
+  text-align: left;
+}
+
+.join-panel td:first-child,
+.join-panel th:first-child {
+  width: 38%;
+  font-family: monospace;
+}
+
+.join-output-row .join-panel table th {
+  width: 72px;
+  font-family: inherit;
 }
 
 .join-panel .matched td:first-child {

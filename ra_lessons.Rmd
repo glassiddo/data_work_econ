@@ -16,78 +16,72 @@ knitr::opts_chunk$set(message = FALSE, warning = FALSE)
 
 These are some notes from working with data for economics research projects, mainly in R and often with spatial data. More or less, things worth considering when constructing datasets, checking results and so on.
 
-```{r load-packages}
-pacman::p_load(
-  dplyr, labelled, sjlabelled, tidyr, ggplot2, scales, sf,
-  here, readr, dtplyr, duckdb, DBI, rnaturalearth
-  )
-
-options(scipen = 999)
-```
-
-maybe say something about whether the code should be aimed at humans or ai - recommend something that is at least readable and debuggable by humans, even if not the cleanest. maybe use some example of a way that ai would write a code 'efficiently' vs humans - perhaps loop is a good example? or even just the number of messages etc
+ maybe use some example of a way that ai would write a code 'efficiently' vs humans - perhaps loop is a good example? or even just the number of messages etc
 
 # Constructing workflows
 
-I prefer working inside an R project, which makes relative paths more stable. Functions like `here::here()` are useful for referring to files from the project root, instead of relying on whatever folder happens to be active.
+I prefer **working inside an R project,** which makes relative paths more stable. Functions like `here::here()` are useful for referring to files from the project root, instead of relying on whatever folder happens to be active.
 
-A simple project structure is usually enough:
+Version control (git + GitHub), is very useful. It can be set up [when the R project is configured](https://rfortherestofus.com/2021/02/how-to-use-git-github-with-r). I would usually make small commits with messages that explain the change, and use branches or pull requests when the project has several people or when a change is risky. Data files (especially heavy ones) and private files should usually go in `.gitignore`.
+
+A project structure can look like:
 
 <table class="mini-table">
 <thead>
-<tr><th>Folder or file</th><th>What goes there</th><th>Rule of thumb</th></tr>
+<tr><th>Folder or file</th><th>What goes there</th><th>Notes</th></tr>
 </thead>
 <tbody>
 <tr>
 <td><code>data/raw/</code></td>
-<td>Original downloads, exports, shapefiles, survey files.</td>
-<td>Keep close to the original. Do not edit by hand.</td>
+<td>Original downloads.</td>
+<td>Do not edit.</td>
 </tr>
 <tr>
 <td><code>data/intermediate/</code></td>
 <td>Cleaned or partially constructed files.</td>
-<td>Useful when a step is slow or shared across scripts.</td>
+<td>Useful for temporary datasets, before joined together, or before further manipulation.</td>
 </tr>
 <tr>
 <td><code>data/final/</code></td>
 <td>Analysis-ready datasets.</td>
-<td>These should be recreated from scripts, not patched manually.</td>
+<td></td>
 </tr>
 <tr>
-<td><code>R/</code> or numbered scripts</td>
+<td><code>do/</code></td>
 <td><code>01_import</code>, <code>02_clean</code>, <code>03_construct</code>, <code>04_analysis</code>.</td>
 <td>Use names that show the order and purpose.</td>
 </tr>
 <tr>
+<td><code>setup.R</code></td>
+<td>Packages, options, shared paths, and common functions.</td>
+<td>Source it near the start of scripts that need the same setup.</td>
+</tr>
+<tr>
 <td><code>output/</code></td>
-<td>Tables, figures, maps, model objects, reports.</td>
-<td>Use clear names; avoid unexplained versions of the same thing.</td>
+<td>Tables, figures, maps, reports.</td>
+<td></td>
 </tr>
 </tbody>
 </table>
 
-The workflow I want is boring in a good way:
-
-<div class="note-grid">
-<div class="note-card">
-<strong>Import</strong>
-<p>Read raw files, keep source names, and do only minimal parsing.</p>
-</div>
-<div class="note-card">
-<strong>Construct</strong>
-<p>Clean keys, join sources, make derived variables, and save checks near risky steps.</p>
-</div>
-<div class="note-card">
-<strong>Analyze</strong>
-<p>Start from the final constructed data, not from a half-edited object in the environment.</p>
-</div>
-<div class="note-card">
-<strong>Send</strong>
-<p>Rerun from a clean session and make sure the expected files were recreated.</p>
-</div>
-</div>
-
-Version control, usually git and often GitHub, is also useful. I would usually make small commits with messages that explain the change, and use branches or pull requests when the project has several people or when a change is risky. Heavy data files, repeated generated outputs, and private files should usually go in `.gitignore`.
+<!-- <div class="note-grid"> -->
+<!-- <div class="note-card"> -->
+<!-- <strong>Import</strong> -->
+<!-- <p>Read raw files, keep source names, and do only minimal parsing.</p> -->
+<!-- </div> -->
+<!-- <div class="note-card"> -->
+<!-- <strong>Construct</strong> -->
+<!-- <p>Clean keys, join sources, make derived variables, and save checks near risky steps.</p> -->
+<!-- </div> -->
+<!-- <div class="note-card"> -->
+<!-- <strong>Analyze</strong> -->
+<!-- <p>Start from the final constructed data, not from a half-edited object in the environment.</p> -->
+<!-- </div> -->
+<!-- <div class="note-card"> -->
+<!-- <strong>Send</strong> -->
+<!-- <p>Rerun from a clean session and make sure the expected files were recreated.</p> -->
+<!-- </div> -->
+<!-- </div> -->
 
 For reproducibility, I would keep the seed discussion near the code that actually uses randomness. Fixed seeds (e.g., `set.seed(123)`) are deterministic - see [this blog post](https://blog.genesmindsmachines.com/p/if-your-random-seed-is-42-i-will). One option is to generate a seed once, record it, and then keep using that same seed throughout the project.
 
@@ -95,9 +89,20 @@ Before sending results, I would rerun the relevant scripts from a clean session 
 
 # Working in R
 
-## Style and speed
+## Style
 
-I mainly use `dplyr` because I like its syntax, its use of pipes (and as I'm used to it), thus the examples are going to use it.
+I mainly use `tidyverse` (and `dplyr`) because I like its syntax, its use of pipes (and as I'm used to it). Thus the examples are largely going to use it.
+
+I recommend to load packages with `pacman::p_load`, which is cleaner than many lines of `library()` and installs packages that are not loaded.
+
+```{r load-packages}
+if (!require(pacman)) install.packages('pacman', repos = 'https://cran.rstudio.com')
+pacman::p_load(  dplyr, labelled, sjlabelled, tidyr, ggplot2, scales, sf,
+  here, readr, dtplyr, duckdb, DBI, rnaturalearth
+)
+
+options(scipen = 999)
+```
 
 ```{r make-style-example}
 example_df <- tibble::tibble(
@@ -106,10 +111,10 @@ example_df <- tibble::tibble(
 )
 ```
 
-- Ocassionally, check updates for packages you use often, as they can add improved functions. However, automatic updates can be risky if an update changes the behaviour of existing functions.
-- The new pipe (`|>`) is nicer and cleaner than the magrittr `%>%` pipe.
+Another recommendation is to occasionally check updates for packages you use often, as they can feature improved functions. However, automatic updates can be risky if an update changes the behaviour of existing functions. I also recommend to **use the new pipe (`|>`)** which is cleaner than the magrittr `%>%` pipe.
 
-see the difference between coding styles:
+As an example for the improvement in coding style that can be achieved by following updates and using the new pipe, see the difference between the following coding styles.
+The first one uses the 'old' `dplyr` syntax and is much more likely to look like your AI generated code, in the absence of a skill indicating it to do otherwise):
 
 ```{r old-pipe-style, results='hide', class.source='fold-show'}
 example_df %>% 
@@ -120,6 +125,7 @@ example_df %>%
   ungroup()
 ```
 
+Or, a bit cleaner:
 ```{r native-pipe-style, results='hide', class.source='fold-show'}
 example_df |> 
   summarise(
@@ -127,14 +133,23 @@ example_df |>
     .by = iso2
     ) 
 ```
-Decide for yourself but I much prefer the latter.
 
-`data.table` is faster, but for most of my work the difference is not large enough to matter.
 
-For heavier steps, `dtplyr` can be useful. For smaller ones, plain `dplyr` is usually simpler, and the setup cost can take longer than the calculation.
+## Speed
 
+`dplyr` is rather fast for most operations. For most of my work, the difference was not large enough to matter. Still, there are faster alternatives that are very useful at times:
+
+| Tool | What it is | When to use | 
+|---|---|---|
+| `data.table` | A fast alternative syntax for data work. | If you prefer its syntax and need better performance. |
+| `dtplyr` | A `dplyr` front end that translates to `data.table`. | If you want `dplyr` syntax with some `data.table` speed. |
+| `duckdb` | An in-process SQL database. | When the data is too large to comfortably keep in memory. |
+
+However, for many operations, the difference is very small, and the setup cost might take longer than the calculation.
+
+An example:
 ```{r benchmark-dplyr-dtplyr}
-set.seed(23072026)
+set.seed(23072026) # date of project start
 
 speed_df <- tibble::tibble(
   iso2 = sample(sprintf("C%03d", 1:200), 3000000, replace = TRUE),
@@ -180,8 +195,6 @@ dtplyr_elapsed <- system.time({
 cat("dtplyr elapsed:", round(dtplyr_elapsed, 3), "seconds\n")
 ```
 
-`duckdb` is another fast option, especially when the data is too large to keep comfortably in memory. The tradeoff is that you need SQL.
-
 ```{r benchmark-duckdb}
 con <- dbConnect(duckdb())
 duckdb_register(con, "speed_df", speed_df)
@@ -211,7 +224,7 @@ dbDisconnect(con, shutdown = TRUE)
 
 ## Functions with the same names
 
-Some R functions from different packages have the same name. That can create bugs that can be hard to spot. For example, take the `lag` function. For ordinary vectors or data frames, `stats::lag` can produce confusing results, while it might be the default of `lag`. `dplyr::lag` (or `data.table::shift(type = "lag")`) are clearer and more reliable.
+Some R functions from different packages have identical names, which can create bugs that may be hard to spot. For example, take the `lag` function. `stats::lag` can produce confusing results, while it might be the default `lag`. `dplyr::lag` (or `data.table::shift(type = "lag")`) are clearer and more reliable.
 
 ```{r compare-lag-functions}
 lag_example <- tibble::tibble(
@@ -226,24 +239,20 @@ lag_example |>
   )
 ```
 
-Similarly, if code uses `select` without specifying `dplyr::select`, and `raster` has also been loaded, the code might call `raster::select` instead. At least that tends to break with a warning, unlike the `lag` case.
+Similarly, if code uses `select` without specifying `dplyr::select`, and `raster` has also been loaded, the code might call `raster::select` instead (at least that tends to break with a warning).
 
-Another example is `copy_labels`, which exists in both `sjlabelled` and `labelled`. The two versions do not use the same argument order, and they may also change values while copying labels, so it is worth writing the package name explicitly and checking the documentation.
+Another example is `copy_labels`, which exists in both `sjlabelled` and `labelled`. The two versions do not use the same argument order, and they may change values while copying labels, so in those cases write the package name explicitly (ideally in the setup file) and check the documentation.
 
 # Data construction and cleaning
 
-When reading data, parse dates explicitly rather than trusting whatever type R guessed. For example, use `as.Date()` or `lubridate` functions, then check that the result looks right; `"01/02/2020"` is not self-explanatory unless we know the date format.
-
 ## Country-level analysis
 
-A lot of the analysis I have done is at the country level, or uses countries as parent units. So most of the examples here use countries, but the same habits apply to other units too.
+A lot of the analysis I have done is at the country level, or uses countries as parent units. Much of this analysis is similar when using other units of analysis.
 
 ### Country identifiers
-Country names are useful for plots and tables, but they are often inconsistent across datasets. For example, "Ivory Coast" and "Cote d'Ivoire" may refer to the same country. For joins, it is usually better to rely on ISO codes, while keeping the names as labels.
+Country names are useful for plots and tables, but they are often inconsistent across datasets. For example, "Ivory Coast" and "Cote d'Ivoire" may refer to the same country. Thus, I prefer to use ISO codes (e.g., CIV). However, ISO codes also have limitations: South Sudan's ISO3 may appear as `SSD` in one source and `SDS` in another; Namibia's ISO2 code is `NA`, which can be read as missing data; and then aggregates, disputed areas, territories, and historical countries might present other challenges
 
-That does not mean codes are magic. South Sudan may appear as `SSD` in one source and `SDS` in another; Namibia's ISO2 code is `NA`, which can be confused with missing data if the file is read carelessly. Aggregates, disputed areas, territories, historical countries, and source-specific codes still need checks.
-
-For illustration, I use WDI population and GDP files downloaded as CSVs. The construction code is not the point here, so I would hide it in notes or in a script. The useful check is to convert ISO3 to ISO2, then inspect the rows that failed conversion.
+For illustration, I use WDI population and current GDP files, and want to keep all countries. I convert the ISO3 codes to ISO2 with the `countrycode` package, then inspect the rows that failed conversion.
 
 ```{r build-country-panel, include=FALSE}
 pop <- read_csv(here("data", "API_SP.POP.TOTL_DS2_en_csv_v2_33112.csv"), skip = 4) |>
@@ -285,7 +294,7 @@ country_panel_all <- full_join(pop, gdp, join_by(iso3, country_name, year)) |>
   arrange(iso2, year)
 ```
 
-This WDI file includes rows that are not ordinary countries, such as regions and income groups. One quick diagnostic is to inspect the ISO3 codes that failed to convert to ISO2. Most failed conversions are aggregates, but this check also catches special cases that need manual handling, like Kosovo.
+Most failed conversions are aggregates, such as regions and income, but there is also a country that fails the conversion - Kosovo, which is seemingly not mapped in `countrycode`. Thus, I map it manually:
 
 ```{r country-code-triage-data, include=FALSE}
 unmatched_iso3 <- country_panel_all |> 
@@ -293,13 +302,27 @@ unmatched_iso3 <- country_panel_all |>
   distinct(iso3, country_name) |> 
   arrange(country_name)
 
-country_code_triage <- tibble::tribble(
-  ~raw_name, ~iso3, ~converted_iso2, ~decision, ~why,
-  "United States", "USA", "US", "keep", "ordinary country",
-  "Kosovo", "XKX", NA_character_, "manual code XK", "special case",
-  "European Union", "EUU", NA_character_, "custom code EU", "aggregate",
-  "Low income", "LIC", NA_character_, "drop", "aggregate"
-)
+country_code_triage <- bind_rows(
+  country_panel_all |> 
+    filter(iso3 == "USA") |> 
+    distinct(raw_name = country_name, iso3, converted_iso2 = iso2),
+  unmatched_iso3 |> 
+    filter(iso3 %in% c("XKX", "EUU", "LIC")) |> 
+    transmute(raw_name = country_name, iso3, converted_iso2 = NA_character_)
+) |> 
+  mutate(
+    decision = case_when(
+      iso3 == "USA" ~ "keep",
+      iso3 == "XKX" ~ "manual code XK",
+      iso3 == "EUU" ~ "custom code EU",
+      TRUE ~ "drop"
+    ),
+    why = case_when(
+      iso3 == "USA" ~ "ordinary country",
+      iso3 == "XKX" ~ "special case",
+      TRUE ~ "aggregate"
+    )
+  )
 ```
 
 ```{r country-code-triage-table, results='asis', echo=FALSE}
@@ -327,39 +350,21 @@ cat(
 )
 ```
 
-Kosovo and the EU should not silently disappear. They are different kinds of exceptions, so they need different decisions. Here I manually add `XK` for Kosovo and keep `EU` as a custom aggregate. The rest of the failed conversions are dropped from the country panel.
-
 ```{r fix-country-codes, class.source='fold-show'}
 country_panel <- country_panel_all |> 
   mutate(
-    iso2 = case_when(
-      iso3 == "XKX" ~ "XK",
-      iso3 == "EUU" ~ "EU", 
-      TRUE ~ iso2
-      )
+    iso2 = if_else(iso3 == "XKX", "XK", iso2)
   ) |> 
-  filter(!is.na(iso2))
+  filter_out(is.na(iso2)) # filter_out is a new dplyr function
 ```
 
 ### Geographic consistency over time
 
-Geographic units do not always keep the same boundaries over time. Countries change borders, gain independence, or split; administrative units can change too. Datasets handle those changes differently. A value in a given year might refer to current borders, old borders, or something in between.
-For country-level data, pay special attention to places whose borders changed during the period of analysis, or soon before it. "Sudan" might mean present-day Sudan, or Sudan including South Sudan. Montenegro might appear under Yugoslavia, Serbia and Montenegro, or Montenegro. Kosovo has the same problem, even though it is not named in "Serbia and Montenegro", and it may not appear at all in some datasets. Taiwan can also be coded or named in different ways depending on the source.
-
-<!-- To add: perhaps make this a checklist too: which boundaries does the dataset use; are units historical or current; were any units split/merged during the period; are successor states treated consistently; and do plots around the transition years reveal suspicious jumps. -->
-
-This example looks fine: there are no obvious population spikes around South Sudan's independence.
-```{r plot-sudan-south-sudan}
-country_panel |>
-  filter(iso2 %in% c("SD", "SS"), year %in% 2006:2014) |>
-  ggplot() + 
-  geom_line(aes(x = year, y = pop_m, group = country_name, color = country_name))
-
-```
+Geographic units do not always keep the same boundaries over time. Countries change borders, gain independence, or split; this is similarly true to administrative units. Various datasets handle those changes differently. A value in a given year might refer to current borders, old borders, or something in between.
+For country-level data, pay attention to disputed territories and places whose borders changed around the period of analysis. `Sudan` might mean present-day Sudan, or also include South Sudan. Kosovo - if it even appears in the data - might be under the rows of Yugoslavia (until 2003), Serbia and Montenegro (2003-2006), Serbia (2006-2008), or as Kosovo (generally 2008-, but in various datasets might appear as independent only from a later year). Taiwan and Palestine can also be coded or named in different ways depending on the source. Check the metadata to verify those cases.
 
 ## Definitions and units
-
-Pay attention to definitions and units. `gdp` could mean nominal GDP in current local currency, nominal GDP in current US dollars, real GDP in constant 2015 US dollars, or PPP-adjusted GDP. The same short variable name can hide a very different quantity.
+Pay attention to definitions and units. `gdp` could mean nominal GDP in current local currency, nominal GDP in current USD, real GDP in constant USD, or PPP-adjusted GDP. 
 
 Even after the source and units are clear, small changes in the formula can create different variables. Total GDP, GDP per person, logged GDP, and logged GDP per person are not interchangeable.
 
@@ -373,31 +378,10 @@ Even after the source and units are clear, small changes in the formula can crea
 <td><code>gdp</code></td>
 <td><code>gdp / pop</code></td>
 </tr>
-<tr>
-<td>Population</td>
-<td><code>pop</code></td>
-<td><code>gdp</code></td>
-</tr>
-<tr>
-<td>GDP per person</td>
-<td><code>gdp / pop</code></td>
-<td><code>gdp</code></td>
-</tr>
-<tr>
-<td>Log GDP per person</td>
-<td><code>log(gdp / pop)</code></td>
-<td><code>log(gdp) / pop</code></td>
-</tr>
-<tr>
-<td>Log GDP divided by population</td>
-<td><code>log(gdp) / pop</code></td>
-<td><code>log(gdp / pop)</code></td>
-</tr>
 </tbody>
 </table>
 
-
-```{r compare-gdp-definitions, include=FALSE}
+```{r compare-gdp-definitions, include=FALSE, eval=FALSE}
 gdp_definition_check <- country_panel |>
   filter(year == 2024) |>
   mutate(
@@ -417,7 +401,7 @@ gdp_definition_check <- country_panel |>
   )
 ```
 
-```{r gdp-definition-comparison-table, results='asis', echo=FALSE}
+```{r gdp-definition-comparison-table, results='asis', echo=FALSE, eval=FALSE}
 definition_rows <- gdp_definition_check |>
   pivot_longer(
     cols = everything(),
@@ -440,23 +424,25 @@ cat(
 )
 ```
 
+<!-- Possible later addition:
 Before using `log()`, check the values and units. Logging GDP in dollars is not the same as logging GDP in millions, and logging very small values can produce numbers that are technically correct but not very meaningful.
-
-Labels and categories also need some care. Value labels can be useful for understanding survey or administrative data, but they can disappear, change, or conflict after transformations; and factors should be checked before recoding, joining, or modelling.
+-->
 
 ## Joins
 
 Quite often we need to join datasets using one or more common keys. 
-I usually prefer to start with a master dataset that includes the units used in the final analysis, and then add variables to it with `left_join()`. I use the other joins mostly for filtering, diagnostics, or coverage checks:
+I usually like to work a master dataset that includes the units used in the final analysis, and then add variables to it with `left_join()`. I use the other joins mostly for filtering and diagnostics:
 
 | Goal | Usually use |
 |---|---|
 | Add variables to the main analysis data | `left_join()` |
 | Keep only units found in both datasets | `inner_join()` |
 | Find units that failed to match | `anti_join()` |
-| Check coverage across both sources | `full_join()` |
+| Check coverage across both datasets | `full_join()` |
 
-The small example below has two deliberate problems: Mexico appears in the master country-region file but not in the GDP file, while Germany appears in the GDP file but not in the master file. That makes the different joins easier to see.
+(there are also other types I pretty much never use - `right_join`, `semi-join`)
+
+See the example below:
 
 ```{r simple-country-join-example, include=FALSE}
 country_gdp <- tibble::tibble(
@@ -472,15 +458,12 @@ country_regions <- tibble::tibble(
 )
 ```
 
-The colors mark what happens to each key: blue rows match across both files, orange exists only in the master file, and green exists only in the added GDP file.
-
 <div class="join-visual">
-<div class="join-row-label">Input datasets</div>
 <div class="join-input-row">
 <div class="join-panel">
 <div class="join-title">Master data</div>
 <table>
-<tr><th>iso3</th><th>region</th></tr>
+<tr><th>ISO3</th><th>Region</th></tr>
 <tr class="matched"><td>USA</td><td>North America</td></tr>
 <tr class="matched"><td>CHN</td><td>East Asia</td></tr>
 <tr class="matched"><td>IND</td><td>South Asia</td></tr>
@@ -490,7 +473,7 @@ The colors mark what happens to each key: blue rows match across both files, ora
 <div class="join-panel">
 <div class="join-title">Added GDP data</div>
 <table>
-<tr><th>iso3</th><th>gdp_b</th></tr>
+<tr><th>ISO3</th><th>GDP (bn)</th></tr>
 <tr class="matched"><td>USA</td><td>23000</td></tr>
 <tr class="matched"><td>CHN</td><td>18000</td></tr>
 <tr class="matched"><td>IND</td><td>3500</td></tr>
@@ -498,7 +481,6 @@ The colors mark what happens to each key: blue rows match across both files, ora
 </table>
 </div>
 </div>
-<div class="join-row-label">What each join keeps</div>
 <div class="join-output-row">
 <div class="join-panel join-result">
 <div class="join-title"><code>left_join()</code></div>
@@ -535,45 +517,22 @@ The colors mark what happens to each key: blue rows match across both files, ora
 </div>
 </div>
 
-The code is much less interesting than the question the join is answering. In a normal construction step, I would keep the main data on the left, remove duplicate label columns unless I need them, and then print a tiny diagnostic.
+I would usually check:
 
-```{r clean-country-join-example}
-joined_country_regions <- country_regions |>
-  left_join(
-    country_gdp |> select(-country_name),
-    join_by(iso3),
-    relationship = "one-to-one"
-  )
+- whether each key appears only once in each dataset, unless a many-to-one or many-to-many join is intentional
+- whether the number of rows changed
+- whether any rows failed to match
+- whether the new variables have missing values
+- whether duplicate label columns, such as `country_name.x` and `country_name.y`, appeared (would happen if we join by another key, while there are additional duplicate column names)
 
-tibble::tibble(
-  rows_before = nrow(country_regions),
-  rows_after = nrow(joined_country_regions),
-  missing_gdp = sum(is.na(joined_country_regions$gdp_b)),
-  master_only_iso3 = nrow(anti_join(country_regions, country_gdp, join_by(iso3))),
-  added_only_iso3 = nrow(anti_join(country_gdp, country_regions, join_by(iso3)))
-)
-```
 
-Before trusting a join, I would usually check:
-
-- whether the key is unique on each side
-- whether the row count changed
-- whether any important rows failed to match
-- whether the new variables have unexpected missing values
-- whether duplicate label columns, such as `country_name.x` and `country_name.y`, appeared
-
-Joining by country name looks tempting, but it is fragile: "United States" and "United States of America" are the same place, but not the same string. ISO codes are usually better join keys, although they also need checks. The key habit is to treat joins as risky data construction steps, not as harmless plumbing.
-
-## Aggregates
-
+## Aggregates, definitions, and units
 In some datasets there may be aggregates (e.g., "Middle East" in a country-level dataset). In some datasets there are variables that refer to those, but not always, and the names of the 'aggregate' countries might be different across different datasets (e.g., in two different datasets of FAOSTAT, there is in one dataset (https://www.fao.org/faostat/en/#data/FBSH) an aggregated region of 'Low Income Food Deficit Countries', but in another (https://www.fao.org/faostat/en/#data/QCL) this appears as 'Low Income Food Deficit Countries (LIFDCs)'. Given that there is not always an ISO2/3 equivalent for each aggregate, one needs to pay attention to those cases. 
 
-<!-- To add: perhaps turn this into a short checklist: identify aggregate rows; decide whether to keep, drop, or reconstruct them; document the choice; and compare constructed aggregates to a reference source when possible. -->
-
 # Missing values
-Missing values can mean different things - the value was not collected, it was not applicable, it was suppressed, it failed to merge, or it is genuinely unknown. R will often show these as `NA`. `NaN` is the result of an undefined numeric operation, such as `0 / 0`. `NULL` usually means that the object is absent.
+Missing values can mean different things - the value was not collected, it was not applicable, it was withheld or hidden for privacy or reliability reasons, it failed to merge, or it is unknown. R will often show these as `NA`, but there are some variants - `NaN` is the result of an undefined numeric operation, such as `0 / 0`, while `NULL` usually means that the object is absent.
 
-Here is a tiny GDP example. The shaded cells are missing. Suppose the task is to sum GDP over 2023-2025 for each country.
+See the example below. Suppose that the task is to sum GDP over 2023-2025 for each country.
 
 ```{r make-na-example, include=FALSE}
 na_df_long <- tibble::tribble(
@@ -677,16 +636,12 @@ na_sum_comparison <- bind_rows(
   )
 ```
 
-<div class="sum-focus">
-<p>The calculation below is a sum; the missing-value rule decides whether the total uses partial information, returns <code>NA</code>, or only returns <code>NA</code> when all years are missing.</p>
-</div>
-
 ```{r missing-sum-comparison-table, results='asis', echo=FALSE}
 fmt_sum <- function(x) ifelse(is.na(x), "NA", format(round(x, 1), nsmall = 1))
 
 cat(
   '<table class="mini-table">',
-  '<thead><tr><th>Country</th><th>Observed years</th><th><code>na.rm = TRUE</code></th><th><code>na.rm = FALSE</code></th><th>NA only if all missing</th></tr></thead>',
+  '<thead><tr><th rowspan="2">Country</th><th rowspan="2">Observed years</th><th colspan="3">Sum rule</th></tr><tr><th><code>na.rm = TRUE</code></th><th><code>na.rm = FALSE</code></th><th>NA only if all missing</th></tr></thead>',
   '<tbody>',
   paste0(
     '<tr><td>', na_sum_comparison$country_name,
@@ -702,7 +657,8 @@ cat(
 )
 ```
 
-The useful habit is to choose the rule deliberately and show the amount of missingness next to the aggregate. Otherwise, two totals can look equally solid even when one is based on much less data.
+In this case I would probably use `na.rm = TRUE`; but there were ocassions I used the other versions.
+I would choose the rule explicitly, and show the amount of missingness next to the aggregate if relevant:
 
 ```{r missing-values-pattern, eval=FALSE, class.source='fold-show'}
 df |>
@@ -715,11 +671,11 @@ df |>
 
 # Debugging and validating results
 
-A lot of mistakes are much easier to catch immediately after the step that created them. I would usually run some checks after important joins, aggregations, spatial matches, and output construction, rather than only looking at the final regression table or figure.
+A lot of results will look odd; sometimes it's easier to catch them during construction, although some will arise more easily when you see your results and suspect that something is off. You could run some checks after important joins, aggregations, spatial matches, and output construction.
 
 ## Messages and quick checks
 
-One thing I have not done enough, but probably should, is adding a few short messages after important construction steps, to make mistakes easier to notice. Adding too many can make the code noisy, but after joins, aggregations, spatial matches, or output construction, one or two checks can save a lot of confusion later.
+One thing I have not done enough, but probably should, is adding a few short messages after certain construction steps, to make mistakes easier to notice (without adding too many that would make the code hard to read), such as:
 
 <div class="note-grid">
 <div class="note-card">
@@ -761,11 +717,7 @@ message(
 )
 ```
 
-This is deliberately a bit plain. A good message is usually boring, specific, and close to the step that could have gone wrong.
-
 ## Checks after risky steps
-
-I would think of this as a small checklist after risky steps, not as a separate validation project:
 
 <table class="mini-table">
 <thead>
@@ -795,35 +747,18 @@ I would think of this as a small checklist after risky steps, not as a separate 
 </tbody>
 </table>
 
-Other useful checks are boring but effective: impossible values, edge cases, specific examples, random rows, plots over time or on maps, and comparisons to an external source when possible. For example, after cleaning World Bank data and merging countries, if the values look odd, I would check IMF, Eurostat, or a publication and see whether the magnitude is reasonably close.
+Other steps for validation is to examine extreme values, specific examples (either 'suspect' cases like Kosovo or Sudan in country-level data, as well as units that you might have better information on - e.g., your country), random rows, and plot values over time or on maps. Another recommendation is to ocassionally compare to external sources when applicable - for example, after cleaning World Bank data and merging countries, if the values look odd, I would check IMF, Eurostat, or try to find publications that might have the data and see whether the values are reasonably similar.
 
-Before sending results, I would usually rerun the relevant script from a clean session and check that the expected outputs were recreated. If something looks odd but is probably fine, it is still worth mentioning it briefly rather than letting the next person rediscover it.
+<!-- ## Assumptions and judgment calls -->
 
-One compact check after a join might look like this:
-
-```{r join-validation-example}
-join_check <- country_regions |>
-  left_join(
-    country_gdp |> select(-country_name),
-    join_by(iso3)
-  )
-
-tibble::tibble(
-  rows_before = nrow(country_regions),
-  rows_after = nrow(join_check),
-  unmatched_iso3 = nrow(anti_join(country_regions, country_gdp, join_by(iso3))),
-  missing_gdp = sum(is.na(join_check$gdp_b))
-)
-```
-
-## Assumptions and judgment calls
-
+<!-- Future AI-skill note:
 Some choices are not purely technical, so it is better to document them explicitly. For example: dropping aggregate regions, manually coding Kosovo, using the largest spatial overlap, treating all-missing sums as `NA`, using current boundaries for historical data, or choosing one representative point for a polygon. Even a short note helps if someone later needs to understand why the data look the way they do.
+-->
 
 # Plotting
 
-Plots are very useful for two different jobs - inspecting the data and presenting results. For inspection, graphs can indicate weird spikes, missing values, implausible values, and so on, much more clearly than a summary table.
-For a summary of the findings, meanwhile, the main insight should be clear and understandable without forcing the reader to put too much effort. Many graphs in economics papers do this rather badly - they are often ugly, too busy, or hard to read. Some of this is unavoidable, especially if you want a plot to include a lot of information, but that is a trade-off that I think a lot of economists do not consider enough.
+Plots are very useful in economic research, especially for two goals - inspecting the data, and presenting results. For inspection, graphs can indicate implausible or missing values more clearly than tables.
+For a summary of the findings, meanwhile, the main insights should be clear and understandable without forcing the reader to put too much effort. Sadly, in my opinion, many graphs in economics papers fail to do so - they are often ugly, too busy, or hard to read. Some of this is arguably unavoidable, especially if you want a plot to include a lot of information, but the tradeoff between information and clarity is a trade-off that I think a lot of economists do not consider enough. There are also some simple 'tricks' that economists tend to ignore.
 
 <div class="note-grid">
 <div class="note-card">
@@ -838,7 +773,7 @@ For a summary of the findings, meanwhile, the main insight should be clear and u
 
 There are much better guides than whatever I will write here. I really like [Saloni Dattani's guide](https://www.scientificdiscovery.dev/p/salonis-guide-to-data-visualization). The [R Graph Gallery](https://r-graph-gallery.com/) is also a nice source for examples.
 
-The graph type should follow the question. This is only a partial list, but some examples:
+The graph type should follow the question. This is a very partial list, but some examples:
 
 <table class="mini-table">
 <tr><th>Graph type</th><th>Usually useful for</th><th>Note</th></tr>
@@ -880,30 +815,22 @@ plot_df <- country_panel |>
   )
 ```
 
-Raw:
+A simple version of the plot is:
 
 ```{r plot-gdp-pc-raw}
 plot_df |> 
   ggplot() + 
   geom_line(aes(x = year, y = gdp_pc, color = iso2)) +
   scale_x_continuous(breaks = seq(2000, 2024, 4), limits = c(2000, 2024)) +
-  scale_y_continuous(limits = c(0, NA), labels = label_dollar())
-```
-
-Cleaner:
-
-```{r plot-gdp-pc-clean}
-plot_df |> 
-  ggplot() + 
-  geom_line(aes(x = year, y = gdp_pc, color = iso2)) + 
-  scale_x_continuous(breaks = seq(2000, 2024, 4), limits = c(2000, 2024)) +
-  scale_y_continuous(limits = c(0, NA), labels = label_dollar()) +
+  scale_y_continuous(limits = c(0, NA), labels = label_dollar()) + 
   theme_minimal() + 
   theme(axis.title = element_blank()) + 
   labs(title = "GDP per capita across EU countries")
+
 ```
 
-Often, the legend can be replaced by labels placed near the lines. This only works when there are not too many categories, but it is useful when the plot has a few focal series. The plot can also use clearer, more colour-blind friendly colours. Suppose we want to focus on Ireland's rise from Sweden's level of GDP per capita to nearly Luxembourg's. We can highlight those countries and keep the other EU countries in grey:
+Often, the legend can be replaced by labels placed near the lines. This works well when there are not too many categories or when we want to focus on few specific series. 
+Suppose we want to focus on Ireland's rise from Sweden's level of GDP per capita to nearly Luxembourg's. We can highlight those countries and keep the other EU countries in grey:
 
 ```{r plot-gdp-pc-highlighted}
 plot_colors <- c(
@@ -945,7 +872,7 @@ plot_df |>
   labs(title = "Ireland spiked toward the EU's richest")
 ```
 
-Finally, a more polished version could use background colours, a cleaner axis, and the actual country names as labels:
+A more polished version could use a calmer background, fewer grid distractions, and the country names as labels:
 
 ```{r plot-gdp-pc-final}
 plot_df |> 
@@ -985,21 +912,17 @@ A useful AI tip is to name a specific visualization guide rather than asking for
 
 # Spatial analysis
 
-Quite a lot of my work uses spatial data, so I include a few practical notes here.
-
 There are two main types of spatial datasets. Vector data includes discrete geometries, such as points, lines, and polygons. Raster data stores values in grid cells. 
 
 Pay attention to CRS and projections. Areas, distances, buffers, and centroids can be misleading if the data are in longitude/latitude or if layers use different CRS, so check `st_crs()`/`crs()` and use `st_transform` when needed to a projection that makes sense for the operation.
 
-Vector data is often saved as shapefiles. Shapefiles are split across several files (`.shp`, `.shx`, `.dbf`, etc.), have short column-name limits, do not handle mixed geometry types well, and are not especially efficient. I usually prefer `gpkg`: it is one file, handles longer column names, can store multiple layers, and is easier to move around.
+Vector data is often saved as shapefiles. Shapefiles are split across several files (`.shp`, `.shx`, `.dbf`, etc.), and have short column-name limits. Thus, it is recommended to use geopackages (`.gpkg`) when possible, which is a more efficient and easier to use.
 
-For vector data in R, I would usually use `sf`. `sf::read_sf()` and `sf::write_sf()` are convenient wrappers around `st_read()` and `st_write()`, so I use them most of the time, especially when reading a file with one obvious layer.
+**For vector data in R, I would usually use `sf`.** I would use most of the time `sf::read_sf()` and `sf::write_sf()`, which are convenient wrappers around `st_read()` and `st_write()`, unless a file has many layers.
 
-For raster data in R, I would usually use `terra`. Raster data is often saved as `.tif`, especially for ordinary gridded layers. Another common format is `.nc` or NetCDF, which is common for climate data and other datasets with several dimensions.
+**For raster data in R, I would usually use `terra`.** Raster data is often saved as `.tif`, especially for ordinary gridded layers. Another common format is `.nc` or NetCDF, which is often used for climate data.
 
 ## Which tool to use
-
-For me, spatial work usually comes down to three kinds of tools.
 
 | Type | Examples | Main advantages | Main drawbacks |
 |---|---|---|---|
@@ -1030,16 +953,13 @@ I think it is useful to separate the cases, because the main mistakes differ:
 <table class="mini-table">
 <tr><th>Match type</th><th>Usual pattern</th><th>Main risk</th><th>Immediate check</th></tr>
 <tr><td>Point to polygon</td><td><code>st_join(points, polygons, join = st_within)</code></td><td>Points just outside a boundary; duplicate matches if polygons overlap.</td><td>Count unmatched points and points matched to more than one polygon.</td></tr>
-<tr><td>Polygon overlap</td><td><code>st_intersection()</code>, then calculate overlap area.</td><td>Rows multiply; overlaps get counted twice; CRS makes area wrong.</td><td>Compare row counts and sum overlap shares by original unit.</td></tr>
+<tr><td>Polygon overlap</td><td><code>st_intersection()</code>, then calculate overlap area. <code>st_intersects()</code> is useful for a quicker diagnostic.</td><td>Rows multiply; overlaps get counted twice; CRS makes area wrong.</td><td>Compare row counts and sum overlap shares by original unit.</td></tr>
 <tr><td>Nearest match</td><td><code>st_nearest_feature()</code> or <code>nngeo::st_nn()</code>.</td><td>A nearest feature can still be too far away to be meaningful.</td><td>Store distance and flag matches above a cutoff.</td></tr>
-<tr><td>Raster extraction</td><td><code>terra::extract()</code>, often with <code>weights = TRUE</code> or <code>exact = TRUE</code>.</td><td>Partial cells, wrong summary function, or summing variables that should be averaged.</td><td>Check cell counts/weights and compare totals for a few polygons.</td></tr>
+<tr><td>Raster extraction</td><td><code>terra::extract()</code>. <code>weights = TRUE</code> uses approximate cell shares; <code>exact = TRUE</code> calculates more exact overlap shares.</td><td>Partial cells, wrong summary function, or summing variables that should be averaged.</td><td>Check cell counts/weights and compare totals for a few polygons.</td></tr>
 </table>
 
-For point-to-polygon matching, I would usually use `st_join(points, polygons, join = st_within)`, which attaches the polygon attributes to each point that falls inside a polygon. After this, I would check unmatched points.
-
-For polygon-to-polygon matching, note that there are two `sf` functions with similar names: `st_intersects()` and `st_intersection()`. `st_intersection()` returns a new spatial dataset whose rows are the overlapping pieces. For example, if one country overlaps three ecological zones, the result can have three rows for that country, each with a smaller geometry and attributes from both the country layer and the ecological-zone layer. This is useful when we need to calculate overlap areas or area-weighted variables. `st_intersects()` only tells us which geometries touch or overlap, so it can be useful as a quicker diagnostic, or as a first filtering step before running a heavier `st_intersection()`.
-
 If the polygons in one source can overlap each other, decide whether those overlaps should count once or several times before intersecting them with the units of analysis.
+
 For example, take two countries and overlay them with a 0.5 by 0.5 degree grid. Some grid cells cross the border, so after `st_intersection()` one original grid cell can become two country-grid pieces:
 
 ```{r polygon-overlap-pattern, eval=FALSE}
@@ -1067,74 +987,85 @@ country_grid_overlap$overlap_area_km2 <- as.numeric(
   st_area(st_transform(country_grid_overlap, 3035))
 ) / 1e6
 
+grid_belgium_share <- country_grid_overlap |>
+  st_drop_geometry() |>
+  summarise(
+    total_area_km2 = sum(overlap_area_km2),
+    share_in_belgium = sum(overlap_area_km2[country == "Belgium"]) / sum(overlap_area_km2),
+    .by = grid_id
+  )
+
+country_grid_share <- country_grid |>
+  left_join(grid_belgium_share, by = "grid_id") |>
+  mutate(plot_panel = "Share of grid cell in Belgium")
+
 ggplot() +
-  geom_sf(data = overlap_countries, fill = "#f3f4f6", color = "#111827", linewidth = 0.35) +
-  geom_sf(data = country_grid, fill = NA, color = "#9ca3af", linewidth = 0.25) +
   geom_sf(
-    data = country_grid_overlap,
-    aes(fill = country),
+    data = overlap_countries |> mutate(plot_panel = "Split by country"),
+    fill = "#f3f4f6",
+    color = "#111827",
+    linewidth = 0.35
+  ) +
+  geom_sf(
+    data = country_grid |> mutate(plot_panel = "Split by country"),
+    fill = NA,
+    color = "#9ca3af",
+    linewidth = 0.25
+  ) +
+  geom_sf(
+    data = country_grid_overlap |> 
+      filter(country == "Belgium") |> 
+      mutate(plot_panel = "Split by country"),
+    fill = "#D55E00",
     alpha = 0.55,
     color = "white",
     linewidth = 0.12
   ) +
+  geom_sf(
+    data = country_grid_overlap |> 
+      filter(country == "Netherlands") |> 
+      mutate(plot_panel = "Split by country"),
+    fill = "#0072B2",
+    alpha = 0.55,
+    color = "white",
+    linewidth = 0.12
+  ) +
+  geom_sf(
+    data = country_grid_share,
+    aes(fill = share_in_belgium),
+    color = "white",
+    linewidth = 0.12
+  ) +
+  scale_fill_gradient2(
+    low = "#0072B2",
+    mid = "#f3f4f6",
+    high = "#D55E00",
+    midpoint = 0.5,
+    limits = c(0, 1),
+    breaks = c(0, 0.5, 1),
+    labels = c("Netherlands", "Split", "Belgium")
+  ) +
+  facet_wrap(~plot_panel, nrow = 1) +
   coord_sf(datum = NA) +
   theme_void() +
   theme(
     legend.position = "bottom",
-    plot.title = element_text(face = "bold")
+    plot.title = element_text(face = "bold"),
+    strip.text = element_text(face = "bold")
   ) +
   labs(
     title = "Grid cells can overlap more than one country",
     subtitle = "Belgium and the Netherlands overlaid with a 0.5 degree grid",
-    fill = NULL
+    fill = "Share in Belgium"
   )
 ```
 
-The table below shows grid cells that were split across both countries:
-
-```{r inspect-country-grid-overlap, echo=FALSE, results='asis'}
-split_grid_cells <- country_grid_overlap |>
-  st_drop_geometry() |>
-  summarise(
-    total_area_km2 = round(sum(overlap_area_km2), 1),
-    share_in_belgium = round(
-      sum(overlap_area_km2[country == "Belgium"]) / sum(overlap_area_km2),
-      3
-    ),
-    .by = grid_id
-  ) |>
-  filter(share_in_belgium > 0, share_in_belgium < 1) |>
-  slice_head(n = 6)
-
-cat(
-  '<table class="mini-table">',
-  '<tr><th>Grid cell</th><th>Total area (km2)</th><th>Share in Belgium</th></tr>',
-  paste0(
-    '<tr><td><code>', split_grid_cells$grid_id, '</code></td><td>',
-    split_grid_cells$total_area_km2, '</td><td>',
-    split_grid_cells$share_in_belgium, '</td></tr>',
-    collapse = ''
-  ),
-  '</table>'
-)
-```
-
-<div class="note-grid">
-<div class="note-card">
-<strong>Nearest is not automatically good</strong>
-<p>Nearest-feature matching can be useful when there is no exact match. I would keep the distance and set a cutoff before trusting it.</p>
-</div>
-<div class="note-card">
-<strong>Raster summaries depend on the variable</strong>
-<p>For population, we may want a sum. For temperature, we may want a mean. Partial cells may need weights or exact extraction.</p>
-</div>
-</div>
-
-## Creating visualizations
+## Visualizing maps
 
 For maps in R, `ggplot2` with `geom_sf()` is usually enough. A choropleth map usually needs two inputs: boundaries and a variable to color each area.
 
-The example below is useful because it first highlights a bug. If we join by ISO2, France is not matched because the `rnaturalearth` file uses `-99` as its ISO2 code. That is exactly the kind of problem maps can help catch quickly.
+The example below is useful because it first highlights a bug. If we join by ISO2, France is not matched because the `rnaturalearth` file uses `-99` as its ISO2 code (as France has several territories). 
+
 ```{r map-eu-gdp-pc, message=FALSE}
 eu_gdp_2024 <- country_panel |>
   filter(year == 2024, iso2 %in% eu27_countries) |>
@@ -1193,7 +1124,8 @@ bad_iso2_map |>
   )
 ```
 
-The fix is to join by ISO3. For the final display, I would also usually consider binning the values rather than using a continuous color scale, with the bins depending on the comparison we want to make. The first version below keeps a wide top category, which is useful for separating poorer, middle, rich, and very rich countries. The second version uses the same palette but compresses the top and gives more detail in the middle and bottom. 
+The fix is to join by ISO3 in this case. Then, if we want to present the results, we would need to consider the scale, which depends on the comparison we want to make - a continuous color scale, or binned; and if we use bins, then which ones? 
+The first version below keeps a wide top category, which is excellent for distinguishing between the richest (Luxembourg and Ireland), the relatively rich (Germany, Sweden), the 'somewhat' rich (Spain, Italy) and the relatively poorer countries of the EU (Poland, Bulgaria). The second version uses the same palette but compresses the top and gives more detail in the middle and bottom, enabling to distinguish more clearly between for example Poland and Bulgaria: 
 ```{r map-eu-gdp-pc-fixed, message=FALSE, fig.show='hold', out.width='50%', fig.width=6, fig.height=5}
 eu_gdp_map <- europe_boundaries |>
   mutate(in_eu = iso3 %in% eu_gdp_2024$iso3) |>
@@ -1288,7 +1220,7 @@ eu_gdp_map |>
 
 Sometimes we want to use one point for a unit rather than the full polygon. That is especially common when the analysis is heavy, for example calculating road paths between units, or when the question is about specific places inside the unit.
 
-Which point should we use? It depends on what the point is meant to represent.
+Which point should we use? It depends on what the point is meant to represent:
 
 <table class="mini-table">
 <tr><th>Question</th><th>Point choice</th><th>Check before using it</th></tr>
@@ -1297,6 +1229,8 @@ Which point should we use? It depends on what the point is meant to represent.
 <tr><td>Where is the average person in this unit?</td><td>Population-weighted centroid</td><td>Does the point fall between population centers or outside the unit?</td></tr>
 <tr><td>What is the main populated place?</td><td>Highest-population cell or main city</td><td>Is the raster/city source at the right resolution for the project?</td></tr>
 </table>
+
+The example below uses a mock polygon with a hole and a population surface to highlight the difference in points:
 
 ```{r plot-population-centroid-points, echo=FALSE, fig.width=6, fig.height=4}
 population_polygon <- st_polygon(list(
@@ -1320,11 +1254,14 @@ mock_population_grid <- mock_population_grid |>
     x_coord = grid_centers[, 1],
     y_coord = grid_centers[, 2],
     population = round(
-      15 +
-        950 * exp(-((x_coord - 1.0)^2 + (y_coord - 3.0)^2) / 0.18) +
-        240 * exp(-((x_coord - 3.2)^2 + (y_coord - 1.0)^2) / 0.14) +
-        180 * exp(-((x_coord - 3.4)^2 + (y_coord - 3.1)^2) / 0.16) +
-        130 * exp(-((x_coord - 2.0)^2 + (y_coord - 1.9)^2) / 0.12)
+      70 +
+        35 * x_coord +
+        32 * y_coord +
+        220 * exp(-((x_coord - 3.1)^2 + (y_coord - 3.0)^2) / 1.8) +
+        460 * exp(-((x_coord - 3.4)^2 + (y_coord - 3.2)^2) / 0.28) +
+        250 * exp(-((x_coord - 3.3)^2 + (y_coord - 1.0)^2) / 0.28) +
+        180 * exp(-((x_coord - 1.0)^2 + (y_coord - 3.1)^2) / 0.35) +
+        90 * exp(-((x_coord - 0.8)^2 + (y_coord - 0.8)^2) / 0.45)
     )
   )
 
@@ -1415,11 +1352,14 @@ ggplot() +
   )
 ```
 
+<!-- Future spatial-skill note:
 ### Finding a 'representative' category
 Some spatial datasets force a choice between categories. Mines data, for example, may have one row per mine, or a cell-level value for "suitability for a given commodity". If we aggregate to a larger unit, what should the result mean? We could sum the number of distinct mines, use the commodity with the highest suitability value, count whether any mine of each type exists, or do something else. There is no obvious answer here. The right choice depends on whether the variable is meant to capture abundance, dominance, exposure, or just the presence of something.
+-->
 
-# Handoff notes
+<!-- # Handoff notes -->
 
+<!-- Future AI-skill note:
 When handing work to someone else, I would usually include a short note rather than only sending the files. Useful things to mention:
 
 - what changed
@@ -1429,10 +1369,11 @@ When handing work to someone else, I would usually include a short note rather t
 - assumptions or manual decisions
 - strange cases that are probably fine
 - things that are unfinished or need judgment
+-->
 
 # AI use
 
-This will probably change soon, but for now I like separating reusable preferences from project-specific context. One possible structure is:
+This might probably change soon, but for now I like separating reusable preferences from project-specific context. One possible structure is:
 
 ```text
 ai_instructions/
@@ -1468,11 +1409,6 @@ For tasks that are not obvious, I prefer to ask the AI to restate the task or in
 <tr><td>Summarize this raster.</td><td>Extract population totals by admin unit using the population raster and explain how partial cells are handled.</td><td>Whether the variable should be summed or averaged, CRS, cell weights, and a few hand-inspected units.</td></tr>
 <tr><td>Clean this variable.</td><td>Recode the treatment variable using the codebook and flag values not covered by the recode.</td><td>Unused categories, new missing values, and examples from each recoded group.</td></tr>
 </table>
-
-### AI and validation
-
-AI is useful for writing code, explaining unfamiliar packages, and finding possible bugs, but plausible code can still do the wrong thing. I would ask it to add messages and checks, summarize what changed, inspect examples rather than only summary statistics, and compare important constructed variables to an external source when possible.
-
 
 <!-- perhaps turn the wdpa into a full example of workflow and validation in an appendix -->
 
