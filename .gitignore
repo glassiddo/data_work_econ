@@ -1,4 +1,4 @@
-*
-!.gitignore
-!ra_lessons.html
-!ra_lessons.Rmd
+data/
+.Rhistory
+.Rproj.user/
+*.Rproj
