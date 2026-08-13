@@ -47,7 +47,7 @@ A project structure can look like:
 </tr>
 <tr>
 <td><code>do/</code></td>
-<td><code>01_import</code>, <code>02_clean</code>, <code>03_construct</code>, <code>04_analysis, etc.</code></td>
+<td><code>01_import</code>, <code>02_clean</code>, <code>03_construct</code>, <code>04_analysis</code>, etc.</td>
 <td>Use names that show the order and purpose</td>
 </tr>
 <tr>
@@ -63,13 +63,13 @@ A project structure can look like:
 </tbody>
 </table>
 
-**Set an actually random seed.** Fixed seeds (e.g., `set.seed(123)`) are deterministic - see [this blog post](https://blog.genesmindsmachines.com/p/if-your-random-seed-is-42-i-will). One option is to generate a seed once (e.g., based on the starting date of the project), record it, and then keep using that same seed throughout the project.
+**Set an arbitrary recorded seed.** Fixed seeds are useful because they make random steps reproducible, but avoid defaults like `set.seed(123)` that can be copied without thought - see [this blog post](https://blog.genesmindsmachines.com/p/if-your-random-seed-is-42-i-will). One option is to choose a seed once (e.g., based on the starting date of the project), record it, and then keep using that same seed throughout the project.
 
-## AI project context
+## AI workflow
 
-This section is most likely to lose relevance with new technological improvements. 
+This section will probably need updating more often than the rest.
 
-**Use both reusable preferences and project-specific context.** This helps when switching between projects. General instructions can be adjusted for project specific context (e.g., if the coding style in a specific project is somewhat different than the generic one). An example structure is:
+**Use skills for both reusable preferences and project-specific context.** This helps when switching between projects. General instructions can be adjusted for project-specific context (e.g., if the coding style in a specific project is somewhat different than the generic one). An example structure is:
 
 For R-specific skill files, see [this guide](https://rworks.dev/posts/claude-skills-for-r-users/).
 
@@ -87,32 +87,32 @@ ai_instructions/
 
 <table class="mini-table">
 <tr><th>File group</th><th>What belongs there</th><th>When it helps</th></tr>
-<tr><td>General files</td><td>Coding conventions, preferred packages, recurring checks, and writing preferences</td><td>When the same preferences apply across several projects</td></tr>
-<tr><td>Project files</td><td>Question, unit of observation, key datasets, code structure, pipeline order, and known edge cases</td><td>When the project has enough moving parts that repeated explanations become annoying</td></tr>
-<tr><td>Project-specific conventions</td><td>Short additions to the general convention file</td><td>When one project has a special rule, without copying the whole general file again</td></tr>
+<tr><td>General files</td><td>Coding conventions, recurring checks, and writing preferences</td><td>When the same preferences apply across several projects</td></tr>
+<tr><td>Project files</td><td>Question, unit of observation, key datasets, code structure, known edge cases etc.</td><td>For most large projects</td></tr>
+<tr><td>Project-specific conventions</td><td>Modified versions of the general files</td><td>When projects have specific rules for general preferences</td></tr>
 </table>
 
-**Ask the AI to verify understanding.** For tasks that are not obvious, I prefer to ask the AI to interview me briefly before implementing, or restate the task. Often, I ask it to generate a prompt, then review it and submit in a new chat.
+**Ask the AI to verify understanding.** Lean prompts are often fine when the context is already clear. For tasks that are not obvious, I prefer to ask the AI to interview me briefly before implementing, or restate the task. Often, I ask it to generate a prompt, then review it and submit in a new chat. 
+
+The examples below are for simpler tasks:
 
 <table class="mini-table">
-<tr><th>Bad prompt</th><th>Better prompt</th><th>Ask it to check</th></tr>
-<tr><td>Fix this merge</td><td>Use the project context and fix the country-year merge into the master panel</td><td>Duplicate keys, unmatched rows, and row-count changes before/after</td></tr>
-<tr><td>Make this map</td><td>Join the EU GDP data to the boundary file and make a choropleth by GDP per capita</td><td>Which countries failed to match, whether the join key is ISO2/ISO3/name, and whether values look plausible</td></tr>
-<tr><td>Summarize this raster</td><td>Extract population totals by admin unit using the population raster and explain how partial cells are handled</td><td>Whether the variable should be summed or averaged, CRS, cell weights, and a few hand-inspected units</td></tr>
-<tr><td>Clean this variable</td><td>Recode the treatment variable using the codebook and flag values not covered by the recode</td><td>Unused categories, new missing values, and examples from each recoded group</td></tr>
+<tr><th>Too lean</th><th>More useful prompt</th></tr>
+<tr><td>Make a GDP per capita map for EU countries</td><td>Join EU GDP data to a map of European countries and make a choropleth by GDP per capita. Use constant US dollars. Check which countries failed to match, and whether the values look plausible.</td></tr>
+<tr><td>Sum population by admin unit from the raster</td><td>Extract population totals by admin unit using the population raster. Explain how partial cells are handled, confirm how missing and zero values should be treated, and inspect a few units.</td></tr>
 </table>
 
 # Working in R
 
 ## Style
 
-I mainly use `tidyverse` (and `dplyr`) because I like its syntax, its use of pipes (and as I'm used to it). Thus the examples are largely going to use it.
+I mainly use `tidyverse` (and `dplyr`) because I like its syntax and pipe-friendly style, and out of habit. Thus the examples are largely going to use it.
 
-**Load packages with `pacman::p_load`,** which is cleaner than many lines of `library()` and installs packages that are not loaded.
+**I often load packages with `pacman::p_load`,** which is cleaner than many lines of `library()` and installs packages that are not loaded. This is convenient, but remember that it can install missing packages when the script runs.
 
 ```{r load-packages}
 if (!require(pacman)) install.packages('pacman', repos = 'https://cran.rstudio.com')
-pacman::p_load(  dplyr, labelled, sjlabelled, tidyr, ggplot2, scales, sf,
+pacman::p_load(dplyr, labelled, sjlabelled, tidyr, ggplot2, scales, sf,
   here, readr, dtplyr, duckdb, DBI, rnaturalearth
 )
 
@@ -126,9 +126,9 @@ example_df <- tibble::tibble(
 )
 ```
 
-**Check updates occasionally for packages** you use often, since new versions can add better functions. However, automatic updates can be risky if an update changes the behaviour of existing functions. I also use the new pipe (`|>`), which is cleaner than the magrittr `%>%` pipe.
+**Check package updates,** for packages that you use often (e.g., `dplyr`), as new versions can add improved functions. However, automatic updates can be risky if an update changes the behaviour of existing functions. I also use the new pipe (`|>`), which is cleaner than the magrittr `%>%` pipe.
 
-As an example for the improvement in coding style that can be achieved by following updates and using the new pipe, see the difference between the following coding styles.
+As an example of how coding style changes over time, see the difference between the following styles.
 The first one uses the old `dplyr` syntax and is more likely to look like AI-generated code if the AI has not been told otherwise:
 
 ```{r old-pipe-style, results='hide', class.source='fold-show'}
@@ -262,12 +262,12 @@ Another example is `copy_labels`, which exists in both `sjlabelled` and `labelle
 
 ## Working with country-level data
 
-A lot of the analysis I have done is at the country level, or uses countries as parent units. Much of this analysis is similar when using other units of analysis.
+A lot of the analysis I have done is at the country level. Much of this analysis is similar when using other units of analysis.
 
 ### Country identifiers
 **Use ISO codes rather than names.** Country names work well in plots and tables, but they are often inconsistent across datasets. For example, "Ivory Coast" and "Cote d'Ivoire" may refer to the same country. Thus, I prefer to use ISO codes (e.g., CIV). However, ISO codes also have limitations: South Sudan's ISO3 may appear as `SSD` in one source and `SDS` in another; Namibia's ISO2 code is `NA`, which can be read as missing data; and aggregates, disputed areas, territories, and historical countries can create other problems.
 
-For illustration, I use WDI population and current GDP files, and want to keep all countries. I convert the ISO3 codes to ISO2 with the `countrycode` package, then inspect the rows that failed conversion.
+For illustration, I use WDI population and constant-dollar GDP files, and want to keep all countries. I convert the ISO3 codes to ISO2 with the `countrycode` package, then inspect the rows that failed conversion.
 
 ```{r build-country-panel, include=FALSE}
 pop <- read_csv(here("data", "API_SP.POP.TOTL_DS2_en_csv_v2_33112.csv"), skip = 4) |>
@@ -296,11 +296,11 @@ gdp <- read_csv(here("data", "API_NY.GDP.MKTP.KD_DS2_en_csv_v2_34247.csv"), skip
     gdp
   )
 
-country_panel_all <- full_join(pop, gdp, join_by(iso3, country_name, year)) |>
+country_panel_all <- full_join(pop, gdp, join_by(iso3, year)) |>
   transmute(
     iso2 = countrycode::countrycode(iso3, "iso3c", "iso2c", warn = FALSE),
     iso3,
-    country_name,
+    country_name = coalesce(country_name.x, country_name.y),
     year,
     gdp_b = round(gdp / 1e9, 5),
     pop_m = round(pop / 1e6, 3)
@@ -374,7 +374,7 @@ country_panel <- country_panel_all |>
 
 ### Geographic consistency over time
 
-Geographic units do not always keep the same boundaries over time. Countries change borders, gain independence, or split; this is similarly true to administrative units. Various datasets handle those changes differently. A value in a given year might refer to current borders, old borders, or something in between.
+Geographic units do not always keep the same boundaries over time. Countries change borders, gain independence, or split; this is also true for administrative units. Various datasets handle those changes differently. A value in a given year might refer to current borders, old borders, or something in between.
 For country-level data, **pay attention to disputed territories and places whose borders changed** around the period of analysis. `Sudan` might mean present-day Sudan, or also include South Sudan. Kosovo - if it even appears in the data - might be under the rows of Yugoslavia (until 2003), Serbia and Montenegro (2003-2006), Serbia (2006-2008), or as Kosovo (generally 2008-, but in various datasets might appear as independent only from a later year). Taiwan and Palestine can also be coded or named in different ways depending on the source. Check the metadata to verify those cases.
 
 ## Join keys, merge types, and row multiplication
@@ -382,14 +382,16 @@ For country-level data, **pay attention to disputed territories and places whose
 Quite often we need to join datasets using one or more common keys. 
 My default is to work with a master dataset that includes the units used in the final analysis, and then add variables to it with `left_join()`. I use the other joins mostly for filtering and diagnostics:
 
-| Goal | Use |
-|---|---|
-| Add variables to the main analysis data | `left_join()` |
-| Keep only units found in both datasets | `inner_join()` |
-| Find units that failed to match | `anti_join()` |
-| Check coverage across both datasets | `full_join()` |
+| Join | What it does | When I use it |
+|---|---|---|
+| `left_join()` | Keeps master rows and adds variables | Main construction |
+| `inner_join()` | Keeps rows that match in both datasets | Filtering |
+| `anti_join()` | Finds rows that do not match | Diagnostics |
+| `full_join()` | Keeps rows from both datasets | Coverage checks |
+| `semi_join()` | Keeps master rows with a match | Occasional filtering |
+| `right_join()` | Keeps rows from the added dataset | Rarely |
 
-(there are also other types I pretty much never use - `right_join`, `semi-join`)
+I mainly use the first three in ordinary construction scripts.
 
 For example:
 
@@ -457,13 +459,7 @@ country_regions <- tibble::tibble(
 </div>
 </div>
 </div>
-Before joining, check:
-
-- whether each key appears only once in each dataset, unless a many-to-one or many-to-many join is intentional
-- whether the number of rows changed
-- whether any rows failed to match
-- whether the new variables have missing values
-- whether duplicate label columns, such as `country_name.x` and `country_name.y`, appeared (would happen if we join by another key, while there are additional duplicate column names)
+Before joining, check the unit of observation, key uniqueness, unmatched rows, and missing values created by the join. Also look for accidental duplicate columns like `country_name.x` and `country_name.y`.
 
 # Variable construction
 
@@ -474,10 +470,6 @@ Pay attention to definitions and units. For example, `gdp` could mean nominal GD
 
 Even after the source and units are clear, small changes in the formula can create different variables. Total GDP, GDP per person, logged GDP, and logged GDP per person are not interchangeable.
 
-<!-- Possible later addition:
-Before using `log()`, check the values and units. Logging GDP in dollars is not the same as logging GDP in millions, and logging very small values can produce numbers that are technically correct but not very meaningful.
--->
-
 ## Aggregation rules and aggregate units
 **Notice what the aggregates contain and their names.** 
 In some datasets there may be aggregates (e.g., "Middle East" in a country-level dataset). Some datasets have variables that identify them, but not always, and the names of aggregate countries can differ across datasets. In FAOSTAT, [one dataset](https://www.fao.org/faostat/en/#data/FBSH) has an aggregate called "Low Income Food Deficit Countries", while [another](https://www.fao.org/faostat/en/#data/QCL) uses "Low Income Food Deficit Countries (LIFDCs)". Since there is not always an ISO2/3 equivalent for each aggregate, pay attention to those cases.
@@ -485,7 +477,7 @@ In some datasets there may be aggregates (e.g., "Middle East" in a country-level
 ## Missing values
 Missing values can mean different things - the value was not collected, it was not applicable, it was withheld or hidden for privacy or reliability reasons, it failed to merge, or it is unknown. R will often show these as `NA`, but there are some variants - `NaN` is the result of an undefined numeric operation, such as `0 / 0`, while `NULL` usually means that the object is absent.
 
-**Missing values need an explicit rule.** During construction, first try to understand why they are missing. Then decide whether to leave them as missing or replace them with a defensible value, such as the last observed value or a median. Suppose that NAs mean missingness, and we want to sum GDP over 2023-2025 for each country:
+**Missing values need an explicit rule.** During construction, first try to understand why they are missing. Then decide whether to leave them as missing or replace them using a documented rule justified by the project. Suppose that NAs mean missingness, and we want to sum GDP over 2023-2025 for each country:
 
 ```{r make-na-example, include=FALSE}
 na_df_long <- tibble::tribble(
@@ -610,7 +602,6 @@ cat(
 )
 ```
 
-In this case, `na.rm = TRUE` is the better rule; but there were occasions I used the other versions.
 Choose the rule explicitly, and show the amount of missingness next to the aggregate if relevant:
 
 ```{r missing-values-pattern, eval=FALSE, class.source='fold-show'}
@@ -624,7 +615,7 @@ df |>
 
 # Validation
 
-**Run checks after important construction steps.** Joins, aggregations, spatial matches, and output construction are examples. A lot of results will look odd; sometimes it is easier to catch problems during construction, although some only become visible when you see the final results and suspect that something is off.
+**Run checks after important construction steps.** Joins, aggregations, spatial matches, and output construction are examples. The exact check depends on the operation, but the goal is the same: make silent mistakes visible early. A lot of results will look odd; sometimes it is easier to catch problems during construction, although some only become visible when you see the final results and suspect that something is off.
 
 ## Messages and quick checks
 
@@ -664,7 +655,7 @@ message(
 <tbody>
 <tr>
 <td>Join</td>
-<td>Row counts before and after; duplicate keys; unmatched keys; missingness in new variables</td>
+<td>Expected unit of observation; row counts before and after; unmatched keys; missingness in new variables</td>
 <td><code>247 of 250 country-year rows matched; 3 unmatched ISO3 codes.</code></td>
 </tr>
 <tr>
@@ -685,24 +676,8 @@ message(
 </tbody>
 </table>
 
-<table class="mini-table">
-<tr><th>Check</th><th>What to look at</th><th>Example</th></tr>
-<tr><td>Extreme values</td><td>Largest, smallest, zero, and missing values</td><td>GDP per capita values that are impossibly high or low</td></tr>
-<tr><td>Specific cases</td><td>Suspect units and units you know well</td><td>Kosovo or Sudan in country-level data; your own country as a sanity check</td></tr>
-<tr><td>Random rows</td><td>A small sample of ordinary observations</td><td>Rows that look boring, but reveal mismatched labels or impossible combinations</td></tr>
-<tr><td>Plots</td><td>Values over time or on maps</td><td>Breaks, spikes, missing periods, or spatial patterns that should not be there</td></tr>
-<tr><td>External sources</td><td>Comparable values from another source when the result looks odd</td><td>Compare cleaned World Bank values with IMF, Eurostat, or published tables</td></tr>
-</table>
-
-<!-- ## Assumptions and judgment calls -->
-
-<!-- Future AI-skill note:
-Some choices are not purely technical, so it is better to document them explicitly. For example: dropping aggregate regions, manually coding Kosovo, using the largest spatial overlap, treating all-missing sums as `NA`, using current boundaries for historical data, or choosing one representative point for a polygon. Even a short note helps if someone later needs to understand why the data look the way they do.
--->
-
 # Plots
-
-Plots in economic research have two main jobs. First, **inspecting the data**. These plots can be simple because the goal is to understand the data and detect issues, such as implausible or missing values. Second, **presenting the results** and sharing the main insights. These plots should be clean, concise, and should reduce the effort required from the reader. Sadly, many graphs in economics papers fail to do it well. Some of this is arguably unavoidable, especially if you want a plot to include a lot of information, but the trade-off between information and clarity is one that I think a lot of economists do not consider enough. There are also some simple 'tricks' that economists tend to ignore.
+Plots in economic research have two main jobs. First, **inspecting the data**. These plots can be simple because the goal is to understand the data and detect issues, such as implausible or missing values. Second, **presenting the results** and sharing the main insights. These plots should be clean, concise, and should reduce the effort required from the reader.
 
 Some tips that often help:
 
@@ -711,29 +686,21 @@ Some tips that often help:
 - grey out background series when the figure focuses on few important series
 - name a specific visualization guide when asking AI for plot suggestions, rather than asking for a "better plot" in general
 - add annotations when they clarify the figure, although they are annoying to code in R
-- use improved and cleaner themes
 
 There are better guides than this. I really like [Saloni Dattani's guide](https://www.scientificdiscovery.dev/p/salonis-guide-to-data-visualization). The [R Graph Gallery](https://r-graph-gallery.com/) is also a nice source for examples.
 
 The graph type should follow the question. This is a very partial list, but some examples:
-
 <table class="mini-table">
 <tr><th>Graph type</th><th>Best for</th><th>Note</th></tr>
-<tr><td>Line</td><td>Changes over time, especially with a small number of series or highlighted series</td><td>A strong default for most time-series cases I have dealt with</td></tr>
-<tr><td>Bar</td><td>Comparing categories</td><td>Can work well if there are not too many categories</td></tr>
-<tr><td>Stacked bar/area</td><td>Composition or totals</td><td>Can be nice at times, but hard to read unless the question is really about the total, the first category in the stack, or categories that undertook massive changes</td></tr>
+<tr><td>Line</td><td>Changes over time</td><td>Good when order matters</td></tr>
+<tr><td>Bar</td><td>Comparing categories</td><td>Can work well if there aren't many categories</td></tr>
+<tr><td>Stacked bar/area</td><td>Composition or totals</td><td>Can be hard to read</td></tr>
 <tr><td>Pie</td><td>Rarely</td><td>Avoid in most cases - shares are hard to read</td></tr>
+<tr><td>Scatter</td><td>Relationships between two variables</td><td>Good when order does not matter</td></tr>
+<tr><td>Histogram/density</td><td>Distributions</td><td>Good for highlighting skew, outliers and bunching</td></tr>
 </table>
 
-Here is one progression from a quick graph to a cleaner one:
-
-<table class="mini-table">
-<tr><th>Step</th><th>Change</th><th>Why it helps</th></tr>
-<tr><td>Raw</td><td>Plot the series with defaults</td><td>Fast inspection; catches obvious data problems</td></tr>
-<tr><td>Cleaner</td><td>Use a simple theme, remove redundant axis titles, add a plain title</td><td>Less decoding before the reader sees the pattern</td></tr>
-<tr><td>Highlighted</td><td>Grey out the background series and directly label the focal lines</td><td>The comparison becomes explicit</td></tr>
-<tr><td>Final</td><td>Add subtitle/source and make the visual treatment consistent</td><td>Ready to send without losing the diagnostic structure</td></tr>
-</table>
+The next plots show the same data moving from a quick inspection graph to a cleaner presentation version.
 
 ```{r plot-gdp-pc-data, include=FALSE}
 eu27_countries <- c(
@@ -810,7 +777,8 @@ plot_df |>
   coord_cartesian(clip = "off") +
   labs(title = "GDP per capita in Ireland compared to the rest of the EU")
 ```
-That is already much better than what often appears in economics papers and presentations. A more polished version can use a cleaner background, an informative title and subtitle, and country names instead of raw codes:
+
+That is already easier to read than many default plots. A more polished version can use a cleaner background, an informative title and subtitle, and country names instead of raw codes:
 
 ```{r plot-gdp-pc-final}
 plot_df |> 
@@ -849,66 +817,52 @@ plot_df |>
 # Spatial data basics
 
 There are two main types of spatial datasets:
-
 <table class="mini-table">
-<tr><th>Type</th><th>What it stores</th><th>Examples</th><th>R package</th></tr>
-<tr><td>Vector</td><td>Discrete geometries</td><td>Points, lines, and polygons</td><td><code>sf</code></td></tr>
-<tr><td>Raster</td><td>Values in grid cells</td><td>Climate, elevation, population, land cover</td><td><code>terra</code></td></tr>
+<tr><th>Type</th><th>What it stores</th><th>Common examples</th><th>R package</th></tr>
+<tr><td>Vector</td><td>Points, lines, or polygons</td><td>Boundaries, roads, locations</td><td><code>sf</code></td></tr>
+<tr><td>Raster</td><td>Values in grid cells</td><td>Climate, elevation, population</td><td><code>terra</code></td></tr>
 </table>
 
 **For vector data in R, use `sf`.** Most of the time, `sf::read_sf()` and `sf::write_sf()` are convenient wrappers around `st_read()` and `st_write()`, unless a file has many layers. Vector data is often saved as shapefiles. Shapefiles are split across several files (`.shp`, `.shx`, `.dbf`, etc.) and have short column-name limits. Use geopackages (`.gpkg`) when possible. They are more efficient and easier to work with.
 
 **For raster data in R, use `terra`.** Raster data is often saved as `.tif`, especially for ordinary gridded layers. Another common format is `.nc` or NetCDF, which is often used for climate data.
 
-Pay attention to CRS and projections. Areas, distances, buffers, and centroids can be misleading if the data are in longitude/latitude or if layers use different CRS, so check `st_crs()`/`crs()` and use `st_transform` when needed to a projection that makes sense for the operation.
+Pay attention to CRS and projections. A CRS tells R how coordinates on the screen relate to places on Earth. Areas, distances, buffers, and centroids can be misleading if the data are in longitude/latitude or if layers use different CRS, so check `st_crs()`/`crs()` and use `st_transform` when needed to a projection that makes sense for the operation.
 
 ## Which tool to use
 
-| Type | Examples | Main advantages | Main drawbacks |
+| Tool | Examples | Main advantages | Main drawbacks |
 |---|---|---|---|
-| Programming languages | R with `sf` and `terra`; Python with `geopandas`, `rasterio`, `xarray`, etc. | Reproducible workflows; easy to combine spatial work with data cleaning, modeling, and plotting; good for local vector/raster operations | Local storage and memory can become a problem; worse for some visual validation |
-| GIS software | QGIS, ArcGIS | Inspection, validation, manual exploration, and cartographic output | Requires local storage; less convenient for some analysis workflows |
-| Google Earth Engine | GEE Code Editor, GEE Python API | Hosted data catalogs; convenient raster and remote-sensing operations; interactive map checking; avoids many local storage problems | Less intuitive coding and debugging; quotas and server-side limits; less convenient for some reproducible project workflows |
+| Programming languages | R, Python | Reproducible; easy to combine with cleaning and modeling | Storage, memory, and visual inspection |
+| GIS software | QGIS, ArcGIS | Visual inspection, manual exploration, cartography | Less convenient for scripted workflows |
+| Google Earth Engine | Code Editor, Python API | Hosted catalogs and large raster summaries | Quotas and server-side debugging |
 
-Programming languages can do most of the work well. They are fast enough for many cases, and visualizations like `ggplot2::geom_sf()` are decent. They are especially convenient when the spatial step sits inside a larger data construction or analysis workflow.
+Several notes on GIS software and GEE:
 
-GIS software helps with visual inspection and debugging. ArcGIS is powerful but not free; QGIS is very good for checking whether a spatial join worked or matched the wrong places. You can also program inside GIS tools, but I find that less convenient than `sf` in R. QGIS may still be easier when starting out, and sometimes it is simply the best way to see what is going on.
+- ArcGIS is powerful but not free
+- You can also program inside GIS tools, but I find that less convenient than `sf` in R
+- GEE is best when the data already exists in the [Earth Engine data catalog](https://developers.google.com/earth-engine/datasets/) or the [GEE community catalog](https://gee-community-catalog.org/) - such as Hansen forest loss data or GHSL built-up - as you avoid downloading and storing large rasters
+- The coding experience in GEE is more annoying, but there's now a Gemini assistant there (which requires a Gemini API key, so is not unlimited).
+- GEE's new quotas still allow rather comfortably to get spatial aggregations and so on, but more limited for heavier operations like geometric operations or raw image analysis
+- For GEE, using the Python API can keep the spatial step in the same project workflow, but it's harder to visually debug; you can start in the GEE code editor and let an AI convert it to Python when done (verify that outputs are identical)
 
-GEE is strongest when the data already exists in the [Earth Engine data catalog](https://developers.google.com/earth-engine/datasets/) or the [GEE community catalog](https://gee-community-catalog.org/). Hansen forest loss data and GHSL built-up data are easier to use there because you can avoid downloading and storing large rasters.
-
-<table class="mini-table">
-<tr><th>Good fit</th><th>Why</th><th>Caveat</th></tr>
-<tr><td>Catalog rasters</td><td>The data are already hosted, so you avoid large local downloads</td><td>You still need to check definitions, versions, and spatial resolution</td></tr>
-<tr><td>Remote sensing</td><td>GEE handles filtering image collections by date, cloud cover, or location; combining images; and reducing values over space or time</td><td>Server-side objects and quota limits can make debugging slow</td></tr>
-<tr><td>Large raster summaries</td><td>The computation can run close to the data instead of on your laptop</td><td>It is not obvious that every heavy spatial task should go there, especially for noncommercial users</td></tr>
-<tr><td>Mixed R/Python/Stata projects</td><td>The Python API can keep the spatial step in the same project workflow</td><td>The Code Editor itself uses the Earth Engine JavaScript API, which can feel separate from the rest of the project</td></tr>
-</table>
-
-The coding experience is also annoying: many objects are server-side, and errors can be opaque. GEE now has a Gemini assistant in the Code Editor, which I have not tried; it requires a Gemini API key, so it is not necessarily unlimited or free.
-
-When unsure, AI can help judge the tradeoffs. Since trying a small R version is now cheap, start there and check whether it is fast enough.
+When unsure, AI can help consider the trade-offs. Since trying a small R version is now cheap, start there and check whether it is fast enough.
 
 ### Recommendations for working with GEE
 
-<table class="mini-table">
-<tr><th>Situation</th><th>What to do</th><th>Why</th></tr>
-<tr><td>The same units appear in several scripts</td><td>Create a master feature collection, such as <code>var worldUnits = ee.FeatureCollection('projects/ee-your_project/assets/worldUnits');</code></td><td>Each script can call the same cleaned units</td></tr>
-<tr><td>AI suggests a boundary dataset such as <a href="https://developers.google.com/earth-engine/datasets/catalog/FAO_GAUL_2015_level0"><code>FAO/GAUL/2015/level0</code></a></td><td>Check whether territories or administrative units need to be merged before grouping by ISO3</td><td>Country-level comparisons can be wrong if the boundary file uses different units</td></tr>
-<tr><td>The boundary file needs cleaning</td><td>Use a separate GEE script to clean names, match to ISO3, merge units, and export a reusable asset</td><td>Analysis scripts stay shorter and call the same version of the cleaned boundary file</td></tr>
-</table>
+- If the same spatial units appear in several scripts, create one master feature collection, such as `var worldUnits = ee.FeatureCollection('projects/ee-your_project/assets/worldUnits');`. Then each script can call the same cleaned units.
+- If AI suggests a boundary dataset such as [`FAO/GAUL/2015/level0`](https://developers.google.com/earth-engine/datasets/catalog/FAO_GAUL_2015_level0), check whether territories or administrative units need to be merged before grouping by ISO3. Country-level comparisons can be wrong if the boundary file uses different units.
+- If the boundary file needs cleaning, use a separate GEE script to clean names, match to ISO3, merge units, and export a reusable asset. Analysis scripts stay shorter and call the same version of the cleaned boundary file.
 
 # Spatial matching
 
 Spatial units often require join operations, and those joins require judgment calls. A unit may intersect several polygons, a point may fall just outside a boundary because the datasets use slightly different borders, or a raster cell may only partly overlap the polygon. We have several options, such as:
-
 <table class="mini-table">
-<tr><th>Match type</th><th>Usual pattern</th><th>Main risk</th><th>Immediate check</th></tr>
-<tr><td>Point to polygon</td><td><code>st_join(points, polygons, join = st_within)</code></td><td>Points just outside a boundary; duplicate matches if polygons overlap</td><td>Count unmatched points and points matched to more than one polygon</td></tr>
-<tr><td>Polygon overlap</td><td><code>st_intersection()</code>, then calculate overlap area; <code>st_intersects()</code> works for a quicker diagnostic</td><td>Rows multiply; overlaps get counted twice; CRS makes area wrong</td><td>Compare row counts and sum overlap shares by original unit</td></tr>
-<tr><td>Nearest match</td><td><code>st_nearest_feature()</code> or <code>nngeo::st_nn()</code></td><td>A nearest feature can still be too far away to be meaningful</td><td>Store distance and flag matches above a cutoff</td></tr>
-<tr><td>Raster extraction</td><td><code>terra::extract()</code></td><td>Partial cells, wrong summary function, or summing variables that should be averaged</td><td>Check cell counts/weights and compare totals for a few polygons</td></tr>
-<tr><td>Raster extraction with approximate weights</td><td><code>terra::extract(weights = TRUE)</code></td><td>Cell shares are approximate</td><td>Compare with a small exact run if the result is sensitive</td></tr>
-<tr><td>Raster extraction with exact overlap</td><td><code>terra::extract(exact = TRUE)</code></td><td>More exact overlap shares can be slower</td><td>Use when partial-cell handling matters for the result</td></tr>
+<tr><th>Type</th><th>Usual pattern</th><th>Risk</th><th>Immediate check</th></tr>
+<tr><td>Point to polygon</td><td><code>st_join(..., st_within)</code></td><td>Unmatched points; duplicate matches</td><td>Count unmatched and multiply matched points</td></tr>
+<tr><td>Polygon overlap</td><td><code>st_intersection()</code></td><td>Rows multiply; area can be wrong</td><td>Check row counts and overlap shares</td></tr>
+<tr><td>Nearest match</td><td><code>st_nearest_feature()</code> or <code>nngeo::st_nn()</code></td><td>A nearest feature can still be far away</td><td>Store distance and flag matches above a cutoff</td></tr>
+<tr><td>Raster extraction</td><td><code>terra::extract()</code></td><td>Partial cells; wrong aggregation</td><td>Check weights and compare a few polygons</td></tr>
 </table>
 
 If the polygons in one source can overlap each other, decide whether those overlaps should count once or several times before intersecting them with the units of analysis.
@@ -1047,23 +1001,23 @@ europe_boundaries <- rnaturalearth::ne_countries(
   select(iso2 = iso_a2, iso3 = adm0_a3, continent, geometry) |>
   filter(continent == "Europe")
 
-bad_iso2_map <- europe_boundaries |>
+iso2_join_diagnostic <- europe_boundaries |>
   mutate(in_eu = iso2 %in% eu27_countries) |>
   left_join(
     eu_gdp_2024 |> select(iso2, gdp_pc),
     join_by(iso2)
   )
 
-bad_iso2_map |>
+iso2_join_diagnostic |>
   filter(iso3 %in% c("FRA", "DEU", "ESP")) |>
   st_drop_geometry() |>
   select(iso2_boundary = iso2, iso3, in_eu, gdp_pc)
 
-bad_iso2_map |>
+iso2_join_diagnostic |>
   ggplot() +
   geom_sf(fill = "#d9d9d9", color = "white", linewidth = 0.12) +
   geom_sf(
-    data = bad_iso2_map |> filter(in_eu),
+    data = iso2_join_diagnostic |> filter(in_eu),
     aes(fill = gdp_pc),
     color = "white",
     linewidth = 0.12
@@ -1093,7 +1047,7 @@ bad_iso2_map |>
 ```
 
 The fix is to join by ISO3 in this case. For presentation, the scale depends on the comparison: continuous color, or binned values; and if binned, which bins?
-The first version keeps a wide top category, which is excellent for distinguishing between the richest (Luxembourg and Ireland), the relatively rich (Germany, Sweden), the 'somewhat' rich (Spain, Italy) and the relatively poorer countries of the EU (Poland, Bulgaria). The second version uses the same palette but compresses the top and gives more detail in the middle and bottom, enabling to distinguish more clearly between for example Poland and Bulgaria: 
+The first version keeps a wide top category, which is excellent for distinguishing between the richest (Luxembourg and Ireland), the relatively rich (Germany, Sweden), the 'somewhat' rich (Spain, Italy) and the relatively poorer countries of the EU (Poland, Bulgaria). The second version uses the same palette but compresses the top and gives more detail in the middle and bottom, making it easier to distinguish between for example Poland and Bulgaria:
 ```{r map-eu-gdp-pc-fixed, message=FALSE, fig.show='hold', out.width='50%', fig.width=6, fig.height=5}
 eu_gdp_map <- europe_boundaries |>
   mutate(in_eu = iso3 %in% eu_gdp_2024$iso3) |>
@@ -1318,201 +1272,180 @@ ggplot() +
   )
 ```
 
-<!-- Future spatial-skill note:
-### Finding a 'representative' category
-Some spatial datasets force a choice between categories. Mines data, for example, may have one row per mine, or a cell-level value for "suitability for a given commodity". If we aggregate to a larger unit, what should the result mean? We could sum the number of distinct mines, use the commodity with the highest suitability value, count whether any mine of each type exists, or do something else. There is no obvious answer here. The right choice depends on whether the variable is meant to capture abundance, dominance, exposure, or just the presence of something.
--->
+<!-- # Worked example -->
 
-<!-- # Handoff notes -->
+<!-- Suppose we want to calculate the share of area of a unit that is protected in each year. For example, we can use WDPA polygons in Namibia. This example ignores points data (which also exists in the World Database of Protected Areas) and accounts only for polygons. -->
 
-<!-- Future AI-skill note:
-When handing work to someone else, include a short note rather than only sending the files. Things to mention:
+<!-- The point is less WDPA itself than the sequence: read polygons, define timing, dissolve overlaps, intersect with units, and inspect the result. Here I use grid cells as the units, but the same logic would apply to districts, countries, or buffers. -->
 
-- what changed
-- which scripts or files matter
-- where the main outputs are
-- which checks were run
-- assumptions or manual decisions
-- strange cases that are probably fine
-- things that are unfinished or need judgment
--->
+<!-- ```{r read-wdpa-polygons-namibia} -->
+<!-- wdpa_dir <- here("data", "wdpa") -->
+<!-- wdpa_polygon_file <- "WDPA_WDOECM_Jun2024_Public_AF_shp-polygons.shp" -->
+<!-- wdpa_years <- c(2000, 2020) -->
 
-<!-- perhaps turn the wdpa into a full example of workflow and validation in an appendix -->
+<!-- wdpa_polygon_paths <- file.path( -->
+<!--   wdpa_dir, -->
+<!--   paste0("AF", 1:3), -->
+<!--   wdpa_polygon_file -->
+<!-- ) -->
 
-# Worked spatial example
+<!-- wdpa_sf <- wdpa_polygon_paths |> -->
+<!--   lapply(read_sf) |> -->
+<!--   bind_rows() |> -->
+<!--   filter( -->
+<!--     STATUS == "Designated", -->
+<!--     PARENT_ISO == "NAM", -->
+<!--     STATUS_YR <= max(wdpa_years) -->
+<!--   ) |> -->
+<!--   select(WDPAID, NAME, DESIG_ENG, IUCN_CAT, STATUS, STATUS_YR, geometry) -->
+<!-- ``` -->
 
-Suppose we want to calculate the share of area of a unit that is protected in each year. For example, we can use WDPA polygons in Namibia. This example ignores points data (which also exists in the World Database of Protected Areas) and accounts only for polygons.
+<!-- The time variable here is `STATUS_YR`, which records the year of the last status change. It often refers to legal designation, but not always; here we can use it for approximate timing. -->
+<!-- The variable of interest is not automatic. We could use the share of area protected, a binary version for whether that share exceeds some cutoff, or another variant. If we want the share by year, we should dissolve protected-area polygons by year. Otherwise, overlapping protected areas can be counted more than once. -->
 
-The point is less WDPA itself than the sequence: read polygons, define timing, dissolve overlaps, intersect with units, and inspect the result. Here I use grid cells as the units, but the same logic would apply to districts, countries, or buffers.
+<!-- ```{r wdpa-share-by-unit-year, message=FALSE, warning=FALSE} -->
+<!-- namibia <- rnaturalearth::ne_countries( -->
+<!--   scale = "medium", -->
+<!--   returnclass = "sf" -->
+<!-- ) |> -->
+<!--   filter(adm0_a3 == "NAM") |> -->
+<!--   st_transform(6933) -->
 
-```{r read-wdpa-polygons-namibia}
-wdpa_dir <- here("data", "wdpa")
-wdpa_polygon_file <- "WDPA_WDOECM_Jun2024_Public_AF_shp-polygons.shp"
-wdpa_years <- c(2000, 2020)
+<!-- sf_use_s2(FALSE) -->
 
-wdpa_polygon_paths <- file.path(
-  wdpa_dir,
-  paste0("AF", 1:3),
-  wdpa_polygon_file
-)
+<!-- namibia_units <- namibia |> -->
+<!--   st_make_grid(n = c(10, 10), square = TRUE) |> -->
+<!--   st_as_sf() |> -->
+<!--   mutate(unit_id = row_number()) |> -->
+<!--   st_intersection(namibia) |> -->
+<!--   select(unit_id) -->
 
-wdpa_sf <- wdpa_polygon_paths |>
-  lapply(read_sf) |>
-  bind_rows() |>
-  filter(
-    STATUS == "Designated",
-    PARENT_ISO == "NAM",
-    STATUS_YR <= max(wdpa_years)
-  ) |>
-  select(WDPAID, NAME, DESIG_ENG, IUCN_CAT, STATUS, STATUS_YR, geometry)
-```
+<!-- namibia_units$unit_area_km2 <- as.numeric(st_area(namibia_units)) / 1e6 -->
 
-The time variable here is `STATUS_YR`, which records the year of the last status change. It often refers to legal designation, but not always; here we can use it for approximate timing.
-The variable of interest is not automatic. We could use the share of area protected, a binary version for whether that share exceeds some cutoff, or another variant. If we want the share by year, we should dissolve protected-area polygons by year. Otherwise, overlapping protected areas can be counted more than once.
+<!-- wdpa_by_year <- wdpa_years |> -->
+<!--   lapply(\(year_i) { -->
+<!--     wdpa_year <- wdpa_sf |> -->
+<!--       filter(STATUS_YR <= year_i) |> -->
+<!--       st_transform(st_crs(namibia_units)) |> -->
+<!--       st_make_valid() |> -->
+<!--       st_union() -->
 
-```{r wdpa-share-by-unit-year, message=FALSE, warning=FALSE}
-namibia <- rnaturalearth::ne_countries(
-  scale = "medium",
-  returnclass = "sf"
-) |>
-  filter(adm0_a3 == "NAM") |>
-  st_transform(6933)
+<!--     st_sf(year = year_i, geometry = wdpa_year) -->
+<!--   }) |> -->
+<!--   bind_rows() -->
 
-sf_use_s2(FALSE)
+<!-- protected_share_by_unit_year <- wdpa_years |> -->
+<!--   lapply(\(year_i) { -->
+<!--     unit_wdpa_intersections <- namibia_units |> -->
+<!--       st_intersection(wdpa_by_year |> filter(year == year_i)) -->
 
-namibia_units <- namibia |>
-  st_make_grid(n = c(10, 10), square = TRUE) |>
-  st_as_sf() |>
-  mutate(unit_id = row_number()) |>
-  st_intersection(namibia) |>
-  select(unit_id)
+<!--     unit_wdpa_intersections$protected_area_km2 <- -->
+<!--       as.numeric(st_area(unit_wdpa_intersections)) / 1e6 -->
 
-namibia_units$unit_area_km2 <- as.numeric(st_area(namibia_units)) / 1e6
+<!--     protected_area_by_unit <- unit_wdpa_intersections |> -->
+<!--       st_drop_geometry() |> -->
+<!--       summarise( -->
+<!--         protected_area_km2 = sum(protected_area_km2, na.rm = TRUE), -->
+<!--         .by = unit_id -->
+<!--       ) -->
 
-wdpa_by_year <- wdpa_years |>
-  lapply(\(year_i) {
-    wdpa_year <- wdpa_sf |>
-      filter(STATUS_YR <= year_i) |>
-      st_transform(st_crs(namibia_units)) |>
-      st_make_valid() |>
-      st_union()
+<!--     namibia_units |> -->
+<!--       st_drop_geometry() |> -->
+<!--       left_join(protected_area_by_unit, join_by(unit_id)) |> -->
+<!--       mutate( -->
+<!--         year = year_i, -->
+<!--         protected_area_km2 = replace_na(protected_area_km2, 0), -->
+<!--         share_area_protected = pmin(1, protected_area_km2 / unit_area_km2) -->
+<!--       ) -->
+<!--   }) |> -->
+<!--   bind_rows() -->
+<!-- ``` -->
 
-    st_sf(year = year_i, geometry = wdpa_year)
-  }) |>
-  bind_rows()
+<!-- ```{r check-wdpa-share-namibia, results='asis'} -->
+<!-- wdpa_share_checks <- protected_share_by_unit_year |> -->
+<!--   summarise( -->
+<!--     n_units = n(), -->
+<!--     n_zero = sum(share_area_protected == 0), -->
+<!--     max_share = max(share_area_protected), -->
+<!--     .by = year -->
+<!--   ) -->
 
-protected_share_by_unit_year <- wdpa_years |>
-  lapply(\(year_i) {
-    unit_wdpa_intersections <- namibia_units |>
-      st_intersection(wdpa_by_year |> filter(year == year_i))
+<!-- cat( -->
+<!--   '<table class="mini-table">', -->
+<!--   '<tr><th>Year</th><th>Units</th><th>Zero protected area</th><th>Max share</th></tr>', -->
+<!--   paste0( -->
+<!--     '<tr><td>', wdpa_share_checks$year, '</td><td>', -->
+<!--     wdpa_share_checks$n_units, '</td><td>', -->
+<!--     wdpa_share_checks$n_zero, '</td><td>', -->
+<!--     label_percent(accuracy = 1)(wdpa_share_checks$max_share), '</td></tr>', -->
+<!--     collapse = '' -->
+<!--   ), -->
+<!--   '</table>' -->
+<!-- ) -->
+<!-- ``` -->
 
-    unit_wdpa_intersections$protected_area_km2 <-
-      as.numeric(st_area(unit_wdpa_intersections)) / 1e6
+<!-- ```{r plot-wdpa-raw-namibia, message=FALSE, warning=FALSE} -->
+<!-- wdpa_raw_by_year <- wdpa_years |> -->
+<!--   lapply(\(year_i) { -->
+<!--     wdpa_sf |> -->
+<!--       filter(STATUS_YR <= year_i) |> -->
+<!--       st_transform(st_crs(namibia_units)) |> -->
+<!--       mutate(year = year_i) -->
+<!--   }) |> -->
+<!--   bind_rows() -->
 
-    protected_area_by_unit <- unit_wdpa_intersections |>
-      st_drop_geometry() |>
-      summarise(
-        protected_area_km2 = sum(protected_area_km2, na.rm = TRUE),
-        .by = unit_id
-      )
+<!-- ggplot() + -->
+<!--   geom_sf(data = namibia, fill = "#f7f7f7", color = "#525252", linewidth = 0.2) + -->
+<!--   geom_sf(data = wdpa_raw_by_year, fill = "#7f1d1d", color = NA, alpha = 0.55) + -->
+<!--   facet_wrap(~year, nrow = 1) + -->
+<!--   coord_sf(datum = NA) + -->
+<!--   theme_void(base_size = 12) + -->
+<!--   theme( -->
+<!--     plot.title = element_text(face = "bold"), -->
+<!--     plot.caption = element_text(color = "#6b7280"), -->
+<!--     strip.text = element_text(face = "bold") -->
+<!--   ) + -->
+<!--   labs( -->
+<!--     title = "WDPA polygons in Namibia", -->
+<!--     subtitle = "Protected areas designated by each year", -->
+<!--     caption = "Source: WDPA, June 2024" -->
+<!--   ) -->
+<!-- ``` -->
 
-    namibia_units |>
-      st_drop_geometry() |>
-      left_join(protected_area_by_unit, join_by(unit_id)) |>
-      mutate(
-        year = year_i,
-        protected_area_km2 = replace_na(protected_area_km2, 0),
-        share_area_protected = pmin(1, protected_area_km2 / unit_area_km2)
-      )
-  }) |>
-  bind_rows()
-```
+<!-- ```{r plot-wdpa-share-namibia, message=FALSE, warning=FALSE} -->
+<!-- namibia_units |> -->
+<!--   left_join(protected_share_by_unit_year, join_by(unit_id)) |> -->
+<!--   ggplot() + -->
+<!--   geom_sf( -->
+<!--     aes(fill = share_area_protected), -->
+<!--     color = "white", -->
+<!--     linewidth = 0.12 -->
+<!--   ) + -->
+<!--   scale_fill_gradientn( -->
+<!--     colors = c("#fff5f0", "#fcbba1", "#fb6a4a", "#cb181d", "#67000d"), -->
+<!--     labels = label_percent(accuracy = 1), -->
+<!--     limits = c(0, max(protected_share_by_unit_year$share_area_protected)), -->
+<!--     name = NULL, -->
+<!--     guide = guide_colorbar( -->
+<!--       barwidth = grid::unit(200, "pt"), -->
+<!--       barheight = grid::unit(9, "pt"), -->
+<!--       label.position = "bottom" -->
+<!--     ) -->
+<!--   ) + -->
+<!--   facet_wrap(~year, nrow = 1) + -->
+<!--   coord_sf(datum = NA) + -->
+<!--   theme_void(base_size = 12) + -->
+<!--   theme( -->
+<!--     legend.position = "bottom", -->
+<!--     plot.title = element_text(face = "bold"), -->
+<!--     plot.caption = element_text(color = "#6b7280"), -->
+<!--     strip.text = element_text(face = "bold") -->
+<!--   ) + -->
+<!--   labs( -->
+<!--     title = "Protected-area coverage in Namibia", -->
+<!--     subtitle = "Share of each grid unit protected, using WDPA polygons designated by each year", -->
+<!--     caption = "Source: WDPA, June 2024" -->
+<!--   ) -->
+<!-- ``` -->
 
-```{r check-wdpa-share-namibia, results='asis'}
-wdpa_share_checks <- protected_share_by_unit_year |>
-  summarise(
-    n_units = n(),
-    n_zero = sum(share_area_protected == 0),
-    max_share = max(share_area_protected),
-    .by = year
-  )
-
-cat(
-  '<table class="mini-table">',
-  '<tr><th>Year</th><th>Units</th><th>Zero protected area</th><th>Max share</th></tr>',
-  paste0(
-    '<tr><td>', wdpa_share_checks$year, '</td><td>',
-    wdpa_share_checks$n_units, '</td><td>',
-    wdpa_share_checks$n_zero, '</td><td>',
-    label_percent(accuracy = 1)(wdpa_share_checks$max_share), '</td></tr>',
-    collapse = ''
-  ),
-  '</table>'
-)
-```
-
-```{r plot-wdpa-raw-namibia, message=FALSE, warning=FALSE}
-wdpa_raw_by_year <- wdpa_years |>
-  lapply(\(year_i) {
-    wdpa_sf |>
-      filter(STATUS_YR <= year_i) |>
-      st_transform(st_crs(namibia_units)) |>
-      mutate(year = year_i)
-  }) |>
-  bind_rows()
-
-ggplot() +
-  geom_sf(data = namibia, fill = "#f7f7f7", color = "#525252", linewidth = 0.2) +
-  geom_sf(data = wdpa_raw_by_year, fill = "#7f1d1d", color = NA, alpha = 0.55) +
-  facet_wrap(~year, nrow = 1) +
-  coord_sf(datum = NA) +
-  theme_void(base_size = 12) +
-  theme(
-    plot.title = element_text(face = "bold"),
-    plot.caption = element_text(color = "#6b7280"),
-    strip.text = element_text(face = "bold")
-  ) +
-  labs(
-    title = "WDPA polygons in Namibia",
-    subtitle = "Protected areas designated by each year",
-    caption = "Source: WDPA, June 2024"
-  )
-```
-
-```{r plot-wdpa-share-namibia, message=FALSE, warning=FALSE}
-namibia_units |>
-  left_join(protected_share_by_unit_year, join_by(unit_id)) |>
-  ggplot() +
-  geom_sf(
-    aes(fill = share_area_protected),
-    color = "white",
-    linewidth = 0.12
-  ) +
-  scale_fill_gradientn(
-    colors = c("#fff5f0", "#fcbba1", "#fb6a4a", "#cb181d", "#67000d"),
-    labels = label_percent(accuracy = 1),
-    limits = c(0, max(protected_share_by_unit_year$share_area_protected)),
-    name = NULL,
-    guide = guide_colorbar(
-      barwidth = grid::unit(200, "pt"),
-      barheight = grid::unit(9, "pt"),
-      label.position = "bottom"
-    )
-  ) +
-  facet_wrap(~year, nrow = 1) +
-  coord_sf(datum = NA) +
-  theme_void(base_size = 12) +
-  theme(
-    legend.position = "bottom",
-    plot.title = element_text(face = "bold"),
-    plot.caption = element_text(color = "#6b7280"),
-    strip.text = element_text(face = "bold")
-  ) +
-  labs(
-    title = "Protected-area coverage in Namibia",
-    subtitle = "Share of each grid unit protected, using WDPA polygons designated by each year",
-    caption = "Source: WDPA, June 2024"
-  )
-```
-
-A few quick checks can catch the obvious problems: which units have zero protected area, which have surprisingly high values, whether any shares exceed one before `pmin()`, and what a handful of strange cases look like on a map.
+<!-- A few quick checks can catch the obvious problems: which units have zero protected area, which have surprisingly high values, whether any shares exceed one before `pmin()`, and what a handful of strange cases look like on a map. -->
