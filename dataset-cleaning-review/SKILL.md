@@ -45,6 +45,12 @@ Before changing or approving a constructed dataset, identify these items or expl
 6. Avoid silent data changes.
    Any drop, merge failure, manual crosswalk, collapsed category, imputation, clipping, or exceptional country/spatial decision should leave a short trace in code, messages, logs, or the final report.
 
+## AI Workflow Memory
+
+For larger projects, keep a short project-state file or decision log that records the intended unit of observation, key datasets, major construction decisions, known edge cases, and unresolved questions.
+
+When work is risky, ask a fresh AI session to audit the script, diagnostics, and outputs without relying on the previous conversation. Treat visual checks, example rows, and row-count/key diagnostics as evidence to preserve, not just temporary debugging.
+
 ## Review Workflow
 
 1. Orient to the dataset.

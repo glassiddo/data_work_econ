@@ -63,15 +63,15 @@ A project structure can look like:
 </tbody>
 </table>
 
-**Set an arbitrary recorded seed.** Fixed seeds are useful because they make random steps reproducible, but avoid defaults like `set.seed(123)` that can be copied without thought - see [this blog post](https://blog.genesmindsmachines.com/p/if-your-random-seed-is-42-i-will). One option is to choose a seed once (e.g., based on the starting date of the project), record it, and then keep using that same seed throughout the project.
+**Set an arbitrary recorded seed.** Fixed seeds are useful because they make random steps reproducible, but avoid defaults like `set.seed(123)` that can be copied without thought. See [this blog post](https://blog.genesmindsmachines.com/p/if-your-random-seed-is-42-i-will). One option is to choose a seed once (e.g., based on the starting date of the project), record it, and then keep using that same seed throughout the project.
 
 ## AI workflow
 
-This section will probably need updating more often than the rest.
-
-**Use skills for both reusable preferences and project-specific context.** This helps when switching between projects. General instructions can be adjusted for project-specific context (e.g., if the coding style in a specific project is somewhat different than the generic one). An example structure is:
+**Use skills for both reusable preferences and project-specific context.** This helps when switching between projects. General instructions can be adjusted for project-specific context (e.g., if the coding style in a specific project is somewhat different from the generic one). An example structure is:
 
 For R-specific skill files, see [this guide](https://rworks.dev/posts/claude-skills-for-r-users/).
+
+For a broader AI workflow for economics projects, see [Scott Cunningham's workflow](https://github.com/scunning1975/mixtapetools). I like the emphasis on treating AI as a thinking partner, keeping decision logs, inspecting outputs visually, and using fresh sessions to audit important work.
 
 ```text
 ai_instructions/
@@ -88,7 +88,7 @@ ai_instructions/
 <table class="mini-table">
 <tr><th>File group</th><th>What belongs there</th><th>When it helps</th></tr>
 <tr><td>General files</td><td>Coding conventions, recurring checks, and writing preferences</td><td>When the same preferences apply across several projects</td></tr>
-<tr><td>Project files</td><td>Question, unit of observation, key datasets, code structure, known edge cases etc.</td><td>For most large projects</td></tr>
+<tr><td>Project files</td><td>Question, unit of observation, key datasets, code structure, known edge cases, etc.</td><td>For most large projects</td></tr>
 <tr><td>Project-specific conventions</td><td>Modified versions of the general files</td><td>When projects have specific rules for general preferences</td></tr>
 </table>
 
@@ -126,17 +126,19 @@ example_df <- tibble::tibble(
 )
 ```
 
-**Check package updates,** for packages that you use often (e.g., `dplyr`), as new versions can add improved functions. However, automatic updates can be risky if an update changes the behaviour of existing functions. I also use the new pipe (`|>`), which is cleaner than the magrittr `%>%` pipe.
+**Check package updates** for packages that you use often (e.g., `dplyr`), as new versions can add improved functions. However, automatic updates can be risky if an update changes the behaviour of existing functions.
+
+I also use the new pipe (`|>`), which is cleaner than the magrittr `%>%` pipe.
 
 As an example of how coding style changes over time, see the difference between the following styles.
-The first one uses the old `dplyr` syntax and is more likely to look like AI-generated code if the AI has not been told otherwise:
+The first one uses the older `dplyr` style:
 
 ```{r old-pipe-style, results='hide', class.source='fold-show'}
 example_df %>% 
   group_by(iso2) %>%
   summarise(
     avg_gdp = mean(gdp_t)
-    ) %>%
+  ) %>%
   ungroup()
 ```
 
@@ -146,7 +148,7 @@ example_df |>
   summarise(
     avg_gdp = mean(gdp_t),
     .by = iso2
-    ) 
+  )
 ```
 
 
@@ -309,7 +311,7 @@ country_panel_all <- full_join(pop, gdp, join_by(iso3, year)) |>
   arrange(iso2, year)
 ```
 
-Most failed conversions are aggregates, such as regions and income, but there is also a country that fails the conversion - Kosovo, which is seemingly not mapped in `countrycode`. Thus, I map it manually:
+Most failed conversions are aggregates, such as regions and income, but there is also a country that fails the conversion: Kosovo, which is not mapped by default here. Thus, I map it manually:
 
 ```{r country-code-triage-data, include=FALSE}
 unmatched_iso3 <- country_panel_all |> 
@@ -459,7 +461,7 @@ country_regions <- tibble::tibble(
 </div>
 </div>
 </div>
-Before joining, check the unit of observation, key uniqueness, unmatched rows, and missing values created by the join. Also look for accidental duplicate columns like `country_name.x` and `country_name.y`.
+Before joining, check the unit of observation, whether the keys are unique at that level, unmatched rows, and missing values created by the join. Also look for accidental duplicate columns like `country_name.x` and `country_name.y`.
 
 # Variable construction
 
@@ -475,7 +477,7 @@ Even after the source and units are clear, small changes in the formula can crea
 In some datasets there may be aggregates (e.g., "Middle East" in a country-level dataset). Some datasets have variables that identify them, but not always, and the names of aggregate countries can differ across datasets. In FAOSTAT, [one dataset](https://www.fao.org/faostat/en/#data/FBSH) has an aggregate called "Low Income Food Deficit Countries", while [another](https://www.fao.org/faostat/en/#data/QCL) uses "Low Income Food Deficit Countries (LIFDCs)". Since there is not always an ISO2/3 equivalent for each aggregate, pay attention to those cases.
 
 ## Missing values
-Missing values can mean different things - the value was not collected, it was not applicable, it was withheld or hidden for privacy or reliability reasons, it failed to merge, or it is unknown. R will often show these as `NA`, but there are some variants - `NaN` is the result of an undefined numeric operation, such as `0 / 0`, while `NULL` usually means that the object is absent.
+Missing values can mean different things: the value was not collected, it was not applicable, it was withheld or hidden for privacy or reliability reasons, it failed to merge, or it is unknown. In ordinary data frames, the main value to watch is `NA`. You may also see `NaN` after undefined numeric operations, such as `0 / 0`; `NULL` usually means that an object is absent, not that a single cell is missing.
 
 **Missing values need an explicit rule.** During construction, first try to understand why they are missing. Then decide whether to leave them as missing or replace them using a documented rule justified by the project. Suppose that NAs mean missingness, and we want to sum GDP over 2023-2025 for each country:
 
@@ -843,7 +845,7 @@ Several notes on GIS software and GEE:
 - You can also program inside GIS tools, but I find that less convenient than `sf` in R
 - GEE is best when the data already exists in the [Earth Engine data catalog](https://developers.google.com/earth-engine/datasets/) or the [GEE community catalog](https://gee-community-catalog.org/) - such as Hansen forest loss data or GHSL built-up - as you avoid downloading and storing large rasters
 - The coding experience in GEE is more annoying, but there's now a Gemini assistant there (which requires a Gemini API key, so is not unlimited).
-- GEE's new quotas still allow rather comfortably to get spatial aggregations and so on, but more limited for heavier operations like geometric operations or raw image analysis
+- GEE's new quotas are still usually enough for spatial aggregations, but more limited for heavier work such as geometric operations or raw image analysis
 - For GEE, using the Python API can keep the spatial step in the same project workflow, but it's harder to visually debug; you can start in the GEE code editor and let an AI convert it to Python when done (verify that outputs are identical)
 
 When unsure, AI can help consider the trade-offs. Since trying a small R version is now cheap, start there and check whether it is fast enough.
@@ -1047,7 +1049,7 @@ iso2_join_diagnostic |>
 ```
 
 The fix is to join by ISO3 in this case. For presentation, the scale depends on the comparison: continuous color, or binned values; and if binned, which bins?
-The first version keeps a wide top category, which is excellent for distinguishing between the richest (Luxembourg and Ireland), the relatively rich (Germany, Sweden), the 'somewhat' rich (Spain, Italy) and the relatively poorer countries of the EU (Poland, Bulgaria). The second version uses the same palette but compresses the top and gives more detail in the middle and bottom, making it easier to distinguish between for example Poland and Bulgaria:
+The first version keeps a wide top category, which emphasizes the richest countries such as Luxembourg and Ireland. The second version uses the same palette but compresses the top and gives more detail in the middle and bottom, making differences among lower- and middle-income EU countries easier to see:
 ```{r map-eu-gdp-pc-fixed, message=FALSE, fig.show='hold', out.width='50%', fig.width=6, fig.height=5}
 eu_gdp_map <- europe_boundaries |>
   mutate(in_eu = iso3 %in% eu_gdp_2024$iso3) |>
