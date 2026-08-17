@@ -46,6 +46,22 @@ html {
   margin: 0;
 }
 
+#header > .btn-group {
+  display: none;
+}
+
+#header .author,
+#header .date {
+  color: #6b7280;
+  font-size: 14px;
+  font-weight: 400;
+  margin: 0;
+}
+
+#header .author {
+  margin-top: 10px;
+}
+
 #TOC {
   background: #ffffff;
   border: 1px solid #d8dee9;
@@ -73,6 +89,10 @@ h3 {
   margin-top: 22px;
 }
 
+table th {
+  text-align: left;
+}
+
 .join-visual {
   gap: 14px;
   margin: 18px 0;
@@ -97,7 +117,7 @@ h3 {
 }
 
 .join-output-row {
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 14px;
 }
 
@@ -116,7 +136,7 @@ h3 {
 .join-panel table {
   width: 100%;
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   table-layout: fixed;
 }
 
@@ -128,7 +148,7 @@ h3 {
 
 .join-panel th,
 .join-panel td {
-  padding: 5px 6px;
+  padding: 4px;
   vertical-align: top;
 }
 
@@ -144,6 +164,17 @@ h3 {
 
 .join-output-row .join-panel td {
   font-family: inherit;
+}
+
+.join-output-row .join-panel th:first-child,
+.join-output-row .join-panel td:first-child {
+  width: 24%;
+  font-family: monospace;
+}
+
+.join-output-row .join-panel th:nth-child(2),
+.join-output-row .join-panel td:nth-child(2) {
+  width: 43%;
 }
 
 .join-panel .matched td:first-child {
@@ -249,17 +280,73 @@ h3 {
 
 .mini-table th {
   background: #f3f4f6;
+  text-align: left;
 }
 
 .mini-table .missing-cell {
   background: #fff4e6;
   color: #9a5a18;
-  font-weight: 700;
+  font-weight: 400;
   text-align: center;
 }
 
 .mini-table .observed-cell {
   background: #f7fbf9;
+  font-weight: 400;
+  text-align: center;
+}
+
+.speed-table,
+.join-types-table,
+.checks-table {
+  table-layout: fixed;
+}
+
+.speed-table th:first-child,
+.speed-table td:first-child,
+.join-types-table th:first-child,
+.join-types-table td:first-child {
+  width: 18%;
+  white-space: nowrap;
+}
+
+.speed-table th:nth-child(2),
+.speed-table td:nth-child(2) {
+  width: 37%;
+}
+
+.join-types-table th:nth-child(2),
+.join-types-table td:nth-child(2) {
+  width: 50%;
+}
+
+.join-types-table th:nth-child(3),
+.join-types-table td:nth-child(3) {
+  width: 32%;
+}
+
+.checks-table th:first-child,
+.checks-table td:first-child {
+  width: 17%;
+}
+
+.checks-table th:nth-child(2),
+.checks-table td:nth-child(2) {
+  width: 51%;
+}
+
+.checks-table th:nth-child(3),
+.checks-table td:nth-child(3) {
+  width: 32%;
+}
+
+.checks-table code {
+  white-space: normal;
+}
+
+.plot-break {
+  clear: both;
+  display: block;
 }
 
 .mini-table .check-good {
@@ -292,5 +379,10 @@ h3 {
     display: block;
     max-width: 100%;
     overflow-x: auto;
+  }
+
+  .join-input-row,
+  .join-output-row {
+    grid-template-columns: 1fr;
   }
 }

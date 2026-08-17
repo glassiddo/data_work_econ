@@ -1,5 +1,7 @@
 ---
-title: "RA lessons"
+title: "Data Work for Economics Research"
+author: "Iddo Glass"
+date: "August 2026"
 output:
   html_document:
     toc: true
@@ -15,7 +17,7 @@ output:
 knitr::opts_chunk$set(message = FALSE, warning = FALSE)
 ```
 
-These are notes from working with data for economics research projects, mainly in R and often with spatial data. They are mostly practical tips that have worked for me.
+These are notes from working with data for economics research projects, mainly in R and often with spatial data.
 
 # Project workflow
 
@@ -94,21 +96,13 @@ ai_instructions/
 
 **Ask the AI to verify understanding.** Lean prompts are often fine when the context is already clear. For tasks that are not obvious, I prefer to ask the AI to interview me briefly before implementing, or restate the task. Often, I ask it to generate a prompt, then review it and submit in a new chat. 
 
-The examples below are for simpler tasks:
-
-<table class="mini-table">
-<tr><th>Too lean</th><th>More useful prompt</th></tr>
-<tr><td>Make a GDP per capita map for EU countries</td><td>Join EU GDP data to a map of European countries and make a choropleth by GDP per capita. Use constant US dollars. Check which countries failed to match, and whether the values look plausible.</td></tr>
-<tr><td>Sum population by admin unit from the raster</td><td>Extract population totals by admin unit using the population raster. Explain how partial cells are handled, confirm how missing and zero values should be treated, and inspect a few units.</td></tr>
-</table>
-
 # Working in R
 
 ## Style
 
 I mainly use `tidyverse` (and `dplyr`) because I like its syntax and pipe-friendly style, and out of habit. Thus the examples are largely going to use it.
 
-**I often load packages with `pacman::p_load`,** which is cleaner than many lines of `library()` and installs packages that are not loaded. This is convenient, but remember that it can install missing packages when the script runs.
+**I often load packages with `pacman::p_load`,** which is cleaner than many lines of `library()` and installs packages that are not loaded.
 
 ```{r load-packages}
 if (!require(pacman)) install.packages('pacman', repos = 'https://cran.rstudio.com')
@@ -119,7 +113,7 @@ pacman::p_load(dplyr, labelled, sjlabelled, tidyr, ggplot2, scales, sf,
 options(scipen = 999)
 ```
 
-```{r make-style-example}
+```{r make-style-example, include=FALSE}
 example_df <- tibble::tibble(
   iso2 = c("US", "US", "CN", "CN"),
   gdp_t = c(25, 26, 17, 18)
@@ -156,11 +150,14 @@ example_df |>
 
 `dplyr` is rather fast for most operations. For most of my work, the difference was not large enough to matter. Still, there are faster alternatives:
 
-| Tool | What it is | When to use | 
-|---|---|---|
-| `data.table` | A fast alternative syntax for data work | If you prefer its syntax and need better performance |
-| `dtplyr` | A `dplyr` front end that translates to `data.table` | If you want `dplyr` syntax with some `data.table` speed |
-| `duckdb` | An in-process SQL database | When the data is too large to comfortably keep in memory |
+<table class="mini-table speed-table">
+<thead><tr><th>Tool</th><th>What it is</th><th>When to use</th></tr></thead>
+<tbody>
+<tr><td><code>data.table</code></td><td>Fast data-manipulation syntax</td><td>When you prefer its syntax or need more speed</td></tr>
+<tr><td><code>dtplyr</code></td><td>Translates <code>dplyr</code> code to <code>data.table</code></td><td>When you want <code>dplyr</code> syntax with more speed</td></tr>
+<tr><td><code>duckdb</code></td><td>An in-process SQL database</td><td>When data is too large for memory</td></tr>
+</tbody>
+</table>
 
 An example:
 ```{r benchmark-dplyr-dtplyr}
@@ -266,7 +263,6 @@ Another example is `copy_labels`, which exists in both `sjlabelled` and `labelle
 
 A lot of the analysis I have done is at the country level. Much of this analysis is similar when using other units of analysis.
 
-### Country identifiers
 **Use ISO codes rather than names.** Country names work well in plots and tables, but they are often inconsistent across datasets. For example, "Ivory Coast" and "Cote d'Ivoire" may refer to the same country. Thus, I prefer to use ISO codes (e.g., CIV). However, ISO codes also have limitations: South Sudan's ISO3 may appear as `SSD` in one source and `SDS` in another; Namibia's ISO2 code is `NA`, which can be read as missing data; and aggregates, disputed areas, territories, and historical countries can create other problems.
 
 For illustration, I use WDI population and constant-dollar GDP files, and want to keep all countries. I convert the ISO3 codes to ISO2 with the `countrycode` package, then inspect the rows that failed conversion.
@@ -374,40 +370,40 @@ country_panel <- country_panel_all |>
   filter_out(is.na(iso2)) # filter_out is a new dplyr function
 ```
 
-### Geographic consistency over time
-
-Geographic units do not always keep the same boundaries over time. Countries change borders, gain independence, or split; this is also true for administrative units. Various datasets handle those changes differently. A value in a given year might refer to current borders, old borders, or something in between.
-For country-level data, **pay attention to disputed territories and places whose borders changed** around the period of analysis. `Sudan` might mean present-day Sudan, or also include South Sudan. Kosovo - if it even appears in the data - might be under the rows of Yugoslavia (until 2003), Serbia and Montenegro (2003-2006), Serbia (2006-2008), or as Kosovo (generally 2008-, but in various datasets might appear as independent only from a later year). Taiwan and Palestine can also be coded or named in different ways depending on the source. Check the metadata to verify those cases.
+**Geographic units do not always keep the same boundaries over time.** Countries change borders, gain independence, or split; this is also true for administrative units. Various datasets handle those changes differently. A value in a given year might refer to current borders, old borders, or something in between. Around the period of analysis, `Sudan` might mean present-day Sudan, or also include South Sudan. Kosovo - if it even appears in the data - might be under the rows of Yugoslavia (until 2003), Serbia and Montenegro (2003-2006), Serbia (2006-2008), or as Kosovo (generally 2008-, but in various datasets might appear as independent only from a later year). Taiwan and Palestine can also be coded or named in different ways depending on the source. Check the metadata to verify those cases.
 
 ## Join keys, merge types, and row multiplication
 
 Quite often we need to join datasets using one or more common keys. 
 My default is to work with a master dataset that includes the units used in the final analysis, and then add variables to it with `left_join()`. I use the other joins mostly for filtering and diagnostics:
 
-| Join | What it does | When I use it |
-|---|---|---|
-| `left_join()` | Keeps master rows and adds variables | Main construction |
-| `inner_join()` | Keeps rows that match in both datasets | Filtering |
-| `anti_join()` | Finds rows that do not match | Diagnostics |
-| `full_join()` | Keeps rows from both datasets | Coverage checks |
-| `semi_join()` | Keeps master rows with a match | Occasional filtering |
-| `right_join()` | Keeps rows from the added dataset | Rarely |
+<table class="mini-table join-types-table">
+<thead><tr><th>Join</th><th>What it does</th><th>Use</th></tr></thead>
+<tbody>
+<tr><td><code>left_join()</code></td><td>Keeps master rows and adds variables</td><td>Main construction</td></tr>
+<tr><td><code>inner_join()</code></td><td>Keeps rows that match in both datasets</td><td>Filtering</td></tr>
+<tr><td><code>anti_join()</code></td><td>Finds rows that do not match</td><td>Diagnostics</td></tr>
+<tr><td><code>full_join()</code></td><td>Keeps rows from both datasets</td><td>Coverage checks</td></tr>
+<tr><td><code>semi_join()</code></td><td>Keeps master rows with a match</td><td>Rarely</td></tr>
+<tr><td><code>right_join()</code></td><td>Keeps rows from the added dataset</td><td>Rarely</td></tr>
+</tbody>
+</table>
 
 I mainly use the first three in ordinary construction scripts.
 
-For example:
+For example, the GDP figures below are 2024 real GDP in billions of constant 2015 US dollars from the World Bank file used above, rounded to the nearest billion:
 
 ```{r simple-country-join-example, include=FALSE}
 country_gdp <- tibble::tibble(
   iso3 = c("USA", "CHN", "IND", "DEU"),
   country_name = c("United States", "China", "India", "Germany"),
-  gdp_b = c(23000, 18000, 3500, 4200)
+  gdp_b = c(22731, 18484, 3434, 3677)
 )
 
 country_regions <- tibble::tibble(
   iso3 = c("USA", "CHN", "IND", "MEX"),
   country_name = c("United States of America", "China", "India", "Mexico"),
-  region = c("North America", "East Asia", "South Asia", "Latin America")
+  region = c("N. America", "E. Asia", "S. Asia", "L. America")
 )
 ```
 
@@ -417,20 +413,20 @@ country_regions <- tibble::tibble(
 <div class="join-title">Master data</div>
 <table>
 <tr><th>ISO3</th><th>Region</th></tr>
-<tr class="matched"><td>USA</td><td>North America</td></tr>
-<tr class="matched"><td>CHN</td><td>East Asia</td></tr>
-<tr class="matched"><td>IND</td><td>South Asia</td></tr>
-<tr class="unmatched"><td>MEX</td><td>Latin America</td></tr>
+<tr class="matched"><td>USA</td><td>N. America</td></tr>
+<tr class="matched"><td>CHN</td><td>E. Asia</td></tr>
+<tr class="matched"><td>IND</td><td>S. Asia</td></tr>
+<tr class="unmatched"><td>MEX</td><td>L. America</td></tr>
 </table>
 </div>
 <div class="join-panel">
 <div class="join-title">Added GDP data</div>
 <table>
-<tr><th>ISO3</th><th>GDP (bn)</th></tr>
-<tr class="matched"><td>USA</td><td>23000</td></tr>
-<tr class="matched"><td>CHN</td><td>18000</td></tr>
-<tr class="matched"><td>IND</td><td>3500</td></tr>
-<tr class="added-only"><td>DEU</td><td>4200</td></tr>
+<tr><th>ISO3</th><th>GDP</th></tr>
+<tr class="matched"><td>USA</td><td>22,731</td></tr>
+<tr class="matched"><td>CHN</td><td>18,484</td></tr>
+<tr class="matched"><td>IND</td><td>3,434</td></tr>
+<tr class="added-only"><td>DEU</td><td>3,677</td></tr>
 </table>
 </div>
 </div>
@@ -439,24 +435,33 @@ country_regions <- tibble::tibble(
 <div class="join-title"><code>left_join()</code></div>
 <p>Keeps the master rows. Mexico stays, but GDP is missing</p>
 <table>
-<tr><td><span class="key-pill matched">USA</span><span class="key-pill matched">CHN</span><span class="key-pill matched">IND</span><span class="key-pill unmatched">MEX</span></td></tr>
-<tr><td><span class="join-note">MEX keeps its region, but GDP is missing; DEU is not added</span></td></tr>
+<tr><th>ISO3</th><th>Region</th><th>GDP</th></tr>
+<tr class="matched"><td>USA</td><td>N. America</td><td>22,731</td></tr>
+<tr class="matched"><td>CHN</td><td>E. Asia</td><td>18,484</td></tr>
+<tr class="matched"><td>IND</td><td>S. Asia</td><td>3,434</td></tr>
+<tr class="unmatched"><td>MEX</td><td>L. America</td><td>NA</td></tr>
 </table>
 </div>
 <div class="join-panel join-result">
 <div class="join-title"><code>inner_join()</code></div>
 <p>Keeps only rows that match in both files</p>
 <table>
-<tr><td><span class="key-pill matched">USA</span><span class="key-pill matched">CHN</span><span class="key-pill matched">IND</span></td></tr>
-<tr><td><span class="join-note">MEX and DEU are both excluded</span></td></tr>
+<tr><th>ISO3</th><th>Region</th><th>GDP</th></tr>
+<tr class="matched"><td>USA</td><td>N. America</td><td>22,731</td></tr>
+<tr class="matched"><td>CHN</td><td>E. Asia</td><td>18,484</td></tr>
+<tr class="matched"><td>IND</td><td>S. Asia</td><td>3,434</td></tr>
 </table>
 </div>
 <div class="join-panel join-result">
 <div class="join-title"><code>full_join()</code></div>
 <p>Keeps everything from both files. Good for checking coverage</p>
 <table>
-<tr><td><span class="key-pill matched">USA</span><span class="key-pill matched">CHN</span><span class="key-pill matched">IND</span><span class="key-pill unmatched">MEX</span><span class="key-pill added-only">DEU</span></td></tr>
-<tr><td><span class="join-note">MEX has missing GDP; DEU has missing region</span></td></tr>
+<tr><th>ISO3</th><th>Region</th><th>GDP</th></tr>
+<tr class="matched"><td>USA</td><td>N. America</td><td>22,731</td></tr>
+<tr class="matched"><td>CHN</td><td>E. Asia</td><td>18,484</td></tr>
+<tr class="matched"><td>IND</td><td>S. Asia</td><td>3,434</td></tr>
+<tr class="unmatched"><td>MEX</td><td>L. America</td><td>NA</td></tr>
+<tr class="added-only"><td>DEU</td><td>NA</td><td>3,677</td></tr>
 </table>
 </div>
 </div>
@@ -470,11 +475,9 @@ Once the rows and keys are under control, the next problems are definitions, lab
 ## Definitions, units, and derived variables
 Pay attention to definitions and units. For example, `gdp` could mean nominal GDP in current local currency, nominal GDP in current USD, real GDP in constant USD, or PPP-adjusted GDP.
 
-Even after the source and units are clear, small changes in the formula can create different variables. Total GDP, GDP per person, logged GDP, and logged GDP per person are not interchangeable.
-
 ## Aggregation rules and aggregate units
 **Notice what the aggregates contain and their names.** 
-In some datasets there may be aggregates (e.g., "Middle East" in a country-level dataset). Some datasets have variables that identify them, but not always, and the names of aggregate countries can differ across datasets. In FAOSTAT, [one dataset](https://www.fao.org/faostat/en/#data/FBSH) has an aggregate called "Low Income Food Deficit Countries", while [another](https://www.fao.org/faostat/en/#data/QCL) uses "Low Income Food Deficit Countries (LIFDCs)". Since there is not always an ISO2/3 equivalent for each aggregate, pay attention to those cases.
+In some datasets there may be aggregates (e.g., "Middle East" in a country-level dataset), and their names can differ across datasets. In FAOSTAT, [one dataset](https://www.fao.org/faostat/en/#data/FBSH) has an aggregate called "Low Income Food Deficit Countries", while [another](https://www.fao.org/faostat/en/#data/QCL) uses "Low Income Food Deficit Countries (LIFDCs)". Since there is not always an ISO2/3 equivalent for each aggregate, pay attention to those cases.
 
 ## Missing values
 Missing values can mean different things: the value was not collected, it was not applicable, it was withheld or hidden for privacy or reliability reasons, it failed to merge, or it is unknown. In ordinary data frames, the main value to watch is `NA`. You may also see `NaN` after undefined numeric operations, such as `0 / 0`; `NULL` usually means that an object is absent, not that a single cell is missing.
@@ -617,11 +620,11 @@ df |>
 
 # Validation
 
-**Run checks after important construction steps.** Joins, aggregations, spatial matches, and output construction are examples. The exact check depends on the operation, but the goal is the same: make silent mistakes visible early. A lot of results will look odd; sometimes it is easier to catch problems during construction, although some only become visible when you see the final results and suspect that something is off.
+**Run checks after important construction steps,** such as joins, aggregations, spatial matches, and output construction.
 
 ## Messages and quick checks
 
-**Add short messages after certain construction steps,** to make mistakes easier to notice. This can make the code harder to read, but it has some value when used sparingly, especially since code is increasingly read by AI tools. For example:
+**Add short messages after certain construction steps,** to make mistakes easier to notice. This can make the code harder to read, but it has some value when used sparingly. AI tools can also run these checks and report the results. For example:
 
 ```{r join-messages, message=TRUE}
 joined_country_regions <- country_regions |>
@@ -648,11 +651,11 @@ message(
 )
 ```
 
-## Checks after risky steps
+## Checks after construction steps
 
-<table class="mini-table">
+<table class="mini-table checks-table">
 <thead>
-<tr><th>After this step</th><th>Quick check</th><th>Message</th></tr>
+<tr><th>After this step</th><th>What to check</th><th>Example message</th></tr>
 </thead>
 <tbody>
 <tr>
@@ -667,7 +670,7 @@ message(
 </tr>
 <tr>
 <td>Spatial match</td>
-<td>Unmatched points or polygons; multiple matches; a quick map of matched and unmatched units</td>
+<td>Unmatched points or polygons; multiple matches; a map of matched and unmatched units</td>
 <td><code>98.6% of points matched to an admin unit; 42 points unmatched.</code></td>
 </tr>
 <tr>
@@ -679,15 +682,15 @@ message(
 </table>
 
 # Plots
-Plots in economic research have two main jobs. First, **inspecting the data**. These plots can be simple because the goal is to understand the data and detect issues, such as implausible or missing values. Second, **presenting the results** and sharing the main insights. These plots should be clean, concise, and should reduce the effort required from the reader.
+To me, plots in economic research have two main jobs. First, **inspecting the data**. These plots can be simple because the goal is to understand the data and detect issues, such as implausible or missing values. Second, **presenting the results** and sharing the main insights. These plots should be clean, concise, and should reduce the effort required from the reader.
 
 Some tips that often help:
 
-- remove axis titles when the title already says what is plotted, when their meaning is implied (years), or when they are hard to read (most y-axes)
-- directly label a few important series instead of using a legend
-- grey out background series when the figure focuses on few important series
-- name a specific visualization guide when asking AI for plot suggestions, rather than asking for a "better plot" in general
-- add annotations when they clarify the figure, although they are annoying to code in R
+- Remove axis titles when the title already says what is plotted, when their meaning is implied (years), or when they are hard to read (most y-axes)
+- Directly label a few important series instead of using a legend
+- Grey out background series when the figure focuses on few important series
+- Name a specific visualization guide when asking AI for plot suggestions, rather than asking for a "better plot" in general
+- Add annotations when they clarify the figure, although they are annoying to code in R
 
 There are better guides than this. I really like [Saloni Dattani's guide](https://www.scientificdiscovery.dev/p/salonis-guide-to-data-visualization). The [R Graph Gallery](https://r-graph-gallery.com/) is also a nice source for examples.
 
@@ -736,6 +739,9 @@ plot_df |>
   labs(title = "GDP per capita across EU countries")
 
 ```
+
+<div class="plot-break"></div>
+
 Notice that the axis titles are unnecessary ('gdp_pc' is implied from the title, 'year' is easily understood); and that it's extremely hard to understand which line refers to which country.
 
 Suppose we want to focus on Ireland's rise from Sweden's level of GDP per capita to nearly Luxembourg's. We can highlight those countries and keep the other EU countries in grey, and remove the axis titles and legend:
@@ -855,6 +861,160 @@ When unsure, AI can help consider the trade-offs. Since trying a small R version
 - If the same spatial units appear in several scripts, create one master feature collection, such as `var worldUnits = ee.FeatureCollection('projects/ee-your_project/assets/worldUnits');`. Then each script can call the same cleaned units.
 - If AI suggests a boundary dataset such as [`FAO/GAUL/2015/level0`](https://developers.google.com/earth-engine/datasets/catalog/FAO_GAUL_2015_level0), check whether territories or administrative units need to be merged before grouping by ISO3. Country-level comparisons can be wrong if the boundary file uses different units.
 - If the boundary file needs cleaning, use a separate GEE script to clean names, match to ISO3, merge units, and export a reusable asset. Analysis scripts stay shorter and call the same version of the cleaned boundary file.
+
+# Maps
+
+For maps in R, `ggplot2` with `geom_sf()` is often enough. A choropleth map needs two inputs: boundaries and a variable to color each area.
+
+This example first highlights a bug. If we join by ISO2, France is not matched because the `rnaturalearth` file uses `-99` as its ISO2 code (as France has several territories). 
+
+```{r map-eu-gdp-pc, message=FALSE}
+eu_gdp_2024 <- country_panel |>
+  filter(year == 2024, iso2 %in% eu27_countries) |>
+  mutate(gdp_pc = gdp_b * 1000 / pop_m) |>
+  select(iso2, iso3, gdp_pc)
+
+europe_boundaries <- rnaturalearth::ne_countries(
+  scale = "small",
+  returnclass = "sf"
+) |> 
+  select(iso2 = iso_a2, iso3 = adm0_a3, continent, geometry) |>
+  filter(continent == "Europe")
+
+iso2_join_diagnostic <- europe_boundaries |>
+  mutate(in_eu = iso2 %in% eu27_countries) |>
+  left_join(
+    eu_gdp_2024 |> select(iso2, gdp_pc),
+    join_by(iso2)
+  )
+
+iso2_join_diagnostic |>
+  filter(iso3 %in% c("FRA", "DEU", "ESP")) |>
+  st_drop_geometry() |>
+  select(iso2_boundary = iso2, iso3, in_eu, gdp_pc)
+
+iso2_join_diagnostic |>
+  ggplot() +
+  geom_sf(fill = "#d9d9d9", color = "white", linewidth = 0.12) +
+  geom_sf(
+    data = iso2_join_diagnostic |> filter(in_eu),
+    aes(fill = gdp_pc),
+    color = "white",
+    linewidth = 0.12
+  ) +
+  scale_fill_viridis_c(
+    labels = label_number(scale = 1 / 1000, suffix = "k"),
+    na.value = "#eeeeee",
+    guide = guide_colorbar(
+      title = NULL,
+      barwidth = grid::unit(160, "pt"),
+      barheight = grid::unit(8, "pt"),
+      label.position = "bottom"
+    )
+  ) +
+  coord_sf(xlim = c(-12, 35), ylim = c(34, 72), expand = FALSE) +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold"),
+    plot.caption = element_text(color = "#6b7280")
+  ) +
+  labs(
+    title = "GDP per capita across EU countries",
+    subtitle = "Reveals a bad join: France is not merged",
+    caption = "Source: The World Bank"
+  )
+```
+
+The fix is to join by ISO3 in this case. For presentation, the scale depends on the comparison: continuous color, or binned values; and if binned, which bins?
+The first version keeps a wide top category, which emphasizes the richest countries such as Luxembourg and Ireland. The second version uses the same palette but compresses the top and gives more detail in the middle and bottom, making differences among countries with relatively lower incomes in the EU easier to see:
+```{r map-eu-gdp-pc-fixed, message=FALSE, fig.show='hold', out.width='50%', fig.width=6, fig.height=5}
+eu_gdp_map <- europe_boundaries |>
+  mutate(in_eu = iso3 %in% eu_gdp_2024$iso3) |>
+  left_join(
+    eu_gdp_2024 |> select(iso3, gdp_pc),
+    join_by(iso3)
+  ) |>
+  mutate(
+    gdp_pc_group_wide = cut(
+      gdp_pc,
+      breaks = c(0, 20000, 35000, 50000, 70000, Inf),
+      labels = c("<$20k", "$20k-$35k", "$35k-$50k", "$50k-$70k", "$70k+"),
+      right = FALSE
+    ),
+    gdp_pc_group_middle = cut(
+      gdp_pc,
+      breaks = c(0, 10000, 15000, 20000, 30000, 40000, Inf),
+      labels = c("<$10k", "$10k-$15k", "$15k-$20k", "$20k-$30k", "$30k-$40k", "$40k+"),
+      right = FALSE
+    )
+  )
+
+eu_gdp_map |>
+  ggplot() +
+  geom_sf(fill = "#d9d9d9", color = "white", linewidth = 0.12) +
+  geom_sf(
+    data = eu_gdp_map |> filter(in_eu),
+    aes(fill = gdp_pc_group_wide),
+    color = "white",
+    linewidth = 0.12
+  ) +
+  scale_fill_manual(
+    values = c(
+      "<$20k" = "#edf8fb",
+      "$20k-$35k" = "#b2e2e2",
+      "$35k-$50k" = "#66c2a4",
+      "$50k-$70k" = "#2ca25f",
+      "$70k+" = "#006d2c"
+    ),
+    na.value = "#eeeeee",
+    name = NULL
+  ) +
+  coord_sf(xlim = c(-12, 35), ylim = c(34, 72), expand = FALSE) +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold"),
+    plot.caption = element_text(color = "#6b7280")
+  ) +
+  labs(
+    title = "Wide bins separate the richest countries",
+    caption = "Source: The World Bank"
+  )
+
+eu_gdp_map |>
+  ggplot() +
+  geom_sf(fill = "#d9d9d9", color = "white", linewidth = 0.12) +
+  geom_sf(
+    data = eu_gdp_map |> filter(in_eu),
+    aes(fill = gdp_pc_group_middle),
+    color = "white",
+    linewidth = 0.12
+  ) +
+  scale_fill_manual(
+    values = c(
+      "<$10k" = "#edf8fb",
+      "$10k-$15k" = "#ccece6",
+      "$15k-$20k" = "#99d8c9",
+      "$20k-$30k" = "#66c2a4",
+      "$30k-$40k" = "#2ca25f",
+      "$40k+" = "#006d2c"
+    ),
+    na.value = "#eeeeee",
+    name = NULL
+  ) +
+  coord_sf(xlim = c(-12, 35), ylim = c(34, 72), expand = FALSE) +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold"),
+    plot.caption = element_text(color = "#6b7280")
+  ) +
+  labs(
+    title = "Narrower bins show more middle and lower variation",
+    caption = "Source: The World Bank"
+  )
+```
 
 # Spatial matching
 
@@ -981,160 +1141,6 @@ ggplot() +
     title = NULL,
     subtitle = NULL,
     fill = "Share in Belgium"
-  )
-```
-
-# Maps
-
-For maps in R, `ggplot2` with `geom_sf()` is often enough. A choropleth map needs two inputs: boundaries and a variable to color each area.
-
-This example first highlights a bug. If we join by ISO2, France is not matched because the `rnaturalearth` file uses `-99` as its ISO2 code (as France has several territories). 
-
-```{r map-eu-gdp-pc, message=FALSE}
-eu_gdp_2024 <- country_panel |>
-  filter(year == 2024, iso2 %in% eu27_countries) |>
-  mutate(gdp_pc = gdp_b * 1000 / pop_m) |>
-  select(iso2, iso3, gdp_pc)
-
-europe_boundaries <- rnaturalearth::ne_countries(
-  scale = "small",
-  returnclass = "sf"
-) |> 
-  select(iso2 = iso_a2, iso3 = adm0_a3, continent, geometry) |>
-  filter(continent == "Europe")
-
-iso2_join_diagnostic <- europe_boundaries |>
-  mutate(in_eu = iso2 %in% eu27_countries) |>
-  left_join(
-    eu_gdp_2024 |> select(iso2, gdp_pc),
-    join_by(iso2)
-  )
-
-iso2_join_diagnostic |>
-  filter(iso3 %in% c("FRA", "DEU", "ESP")) |>
-  st_drop_geometry() |>
-  select(iso2_boundary = iso2, iso3, in_eu, gdp_pc)
-
-iso2_join_diagnostic |>
-  ggplot() +
-  geom_sf(fill = "#d9d9d9", color = "white", linewidth = 0.12) +
-  geom_sf(
-    data = iso2_join_diagnostic |> filter(in_eu),
-    aes(fill = gdp_pc),
-    color = "white",
-    linewidth = 0.12
-  ) +
-  scale_fill_viridis_c(
-    labels = label_number(scale = 1 / 1000, suffix = "k"),
-    na.value = "#eeeeee",
-    guide = guide_colorbar(
-      title = NULL,
-      barwidth = grid::unit(160, "pt"),
-      barheight = grid::unit(8, "pt"),
-      label.position = "bottom"
-    )
-  ) +
-  coord_sf(xlim = c(-12, 35), ylim = c(34, 72), expand = FALSE) +
-  theme_void() +
-  theme(
-    legend.position = "bottom",
-    plot.title = element_text(face = "bold"),
-    plot.caption = element_text(color = "#6b7280")
-  ) +
-  labs(
-    title = "GDP per capita across EU countries",
-    subtitle = "Reveals a bad join: France is not merged",
-    caption = "Source: The World Bank"
-  )
-```
-
-The fix is to join by ISO3 in this case. For presentation, the scale depends on the comparison: continuous color, or binned values; and if binned, which bins?
-The first version keeps a wide top category, which emphasizes the richest countries such as Luxembourg and Ireland. The second version uses the same palette but compresses the top and gives more detail in the middle and bottom, making differences among lower- and middle-income EU countries easier to see:
-```{r map-eu-gdp-pc-fixed, message=FALSE, fig.show='hold', out.width='50%', fig.width=6, fig.height=5}
-eu_gdp_map <- europe_boundaries |>
-  mutate(in_eu = iso3 %in% eu_gdp_2024$iso3) |>
-  left_join(
-    eu_gdp_2024 |> select(iso3, gdp_pc),
-    join_by(iso3)
-  ) |>
-  mutate(
-    gdp_pc_group_wide = cut(
-      gdp_pc,
-      breaks = c(0, 20000, 35000, 50000, 70000, Inf),
-      labels = c("<$20k", "$20k-$35k", "$35k-$50k", "$50k-$70k", "$70k+"),
-      right = FALSE
-    ),
-    gdp_pc_group_middle = cut(
-      gdp_pc,
-      breaks = c(0, 10000, 15000, 20000, 30000, 40000, Inf),
-      labels = c("<$10k", "$10k-$15k", "$15k-$20k", "$20k-$30k", "$30k-$40k", "$40k+"),
-      right = FALSE
-    )
-  )
-
-eu_gdp_map |>
-  ggplot() +
-  geom_sf(fill = "#d9d9d9", color = "white", linewidth = 0.12) +
-  geom_sf(
-    data = eu_gdp_map |> filter(in_eu),
-    aes(fill = gdp_pc_group_wide),
-    color = "white",
-    linewidth = 0.12
-  ) +
-  scale_fill_manual(
-    values = c(
-      "<$20k" = "#edf8fb",
-      "$20k-$35k" = "#b2e2e2",
-      "$35k-$50k" = "#66c2a4",
-      "$50k-$70k" = "#2ca25f",
-      "$70k+" = "#006d2c"
-    ),
-    na.value = "#eeeeee",
-    name = NULL
-  ) +
-  coord_sf(xlim = c(-12, 35), ylim = c(34, 72), expand = FALSE) +
-  theme_void() +
-  theme(
-    legend.position = "bottom",
-    plot.title = element_text(face = "bold"),
-    plot.caption = element_text(color = "#6b7280")
-  ) +
-  labs(
-    title = "Wide bins separate the richest countries",
-    caption = "Source: The World Bank"
-  )
-
-eu_gdp_map |>
-  ggplot() +
-  geom_sf(fill = "#d9d9d9", color = "white", linewidth = 0.12) +
-  geom_sf(
-    data = eu_gdp_map |> filter(in_eu),
-    aes(fill = gdp_pc_group_middle),
-    color = "white",
-    linewidth = 0.12
-  ) +
-  scale_fill_manual(
-    values = c(
-      "<$10k" = "#edf8fb",
-      "$10k-$15k" = "#ccece6",
-      "$15k-$20k" = "#99d8c9",
-      "$20k-$30k" = "#66c2a4",
-      "$30k-$40k" = "#2ca25f",
-      "$40k+" = "#006d2c"
-    ),
-    na.value = "#eeeeee",
-    name = NULL
-  ) +
-  coord_sf(xlim = c(-12, 35), ylim = c(34, 72), expand = FALSE) +
-  theme_void() +
-  theme(
-    legend.position = "bottom",
-    plot.title = element_text(face = "bold"),
-    plot.caption = element_text(color = "#6b7280")
-  ) +
-  labs(
-    title = "Narrower bins show more middle and lower variation",
-    caption = "Source: The World Bank"
   )
 ```
 
