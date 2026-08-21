@@ -69,11 +69,12 @@ A project structure can look like:
 
 ## AI workflow
 
-**Use skills for both reusable preferences and project-specific context.** This helps when switching between projects. General instructions can be adjusted for project-specific context (e.g., if the coding style in a specific project is somewhat different from the generic one). An example structure is:
-
 For R-specific skill files, see [this guide](https://rworks.dev/posts/claude-skills-for-r-users/).
 
-For a broader AI workflow for economics projects, see [Scott Cunningham's workflow](https://github.com/scunning1975/mixtapetools). I like the emphasis on treating AI as a thinking partner, keeping decision logs, inspecting outputs visually, and using fresh sessions to audit important work.
+For a broader AI workflow for economics projects, see [Scott Cunningham's workflow](https://github.com/scunning1975/mixtapetools). 
+
+**You can use skills for both reusable preferences and project-specific context.** 
+This helps when switching between projects. General instructions can be adjusted for project-specific context (e.g., if the coding style in a specific project is somewhat different from the generic one). An example structure is:
 
 ```text
 ai_instructions/
@@ -234,7 +235,7 @@ cat("duckdb elapsed:", round(duckdb_elapsed, 3), "seconds\n")
 dbDisconnect(con, shutdown = TRUE)
 ```
 
-For many operations, the difference is very small, and the setup cost might take longer than the calculation.
+For many operations, the difference is very small, and the setup might take longer than the calculation.
 
 ## Functions with the same names
 
@@ -476,11 +477,11 @@ Once the rows and keys are under control, the next problems are definitions, lab
 Pay attention to definitions and units. For example, `gdp` could mean nominal GDP in current local currency, nominal GDP in current USD, real GDP in constant USD, or PPP-adjusted GDP.
 
 ## Aggregation rules and aggregate units
-**Notice what the aggregates contain and their names.** 
+**Notice what aggregates contain and their names.** 
 In some datasets there may be aggregates (e.g., "Middle East" in a country-level dataset), and their names can differ across datasets. In FAOSTAT, [one dataset](https://www.fao.org/faostat/en/#data/FBSH) has an aggregate called "Low Income Food Deficit Countries", while [another](https://www.fao.org/faostat/en/#data/QCL) uses "Low Income Food Deficit Countries (LIFDCs)". Since there is not always an ISO2/3 equivalent for each aggregate, pay attention to those cases.
 
 ## Missing values
-Missing values can mean different things: the value was not collected, it was not applicable, it was withheld or hidden for privacy or reliability reasons, it failed to merge, or it is unknown. In ordinary data frames, the main value to watch is `NA`. You may also see `NaN` after undefined numeric operations, such as `0 / 0`; `NULL` usually means that an object is absent, not that a single cell is missing.
+Missing values can mean different things, such as: the value was not collected, it was not applicable, it failed to merge, it is unknown, and so on. It generally appears as `NA`, but  `NaN` would appear after undefined numeric operations (such as `0 / 0`); `NULL` usually means that an object (rather than a single cell) is absent.
 
 **Missing values need an explicit rule.** During construction, first try to understand why they are missing. Then decide whether to leave them as missing or replace them using a documented rule justified by the project. Suppose that NAs mean missingness, and we want to sum GDP over 2023-2025 for each country:
 
@@ -684,15 +685,15 @@ message(
 # Plots
 To me, plots in economic research have two main jobs. First, **inspecting the data**. These plots can be simple because the goal is to understand the data and detect issues, such as implausible or missing values. Second, **presenting the results** and sharing the main insights. These plots should be clean, concise, and should reduce the effort required from the reader.
 
+I highly recommend reading [Saloni Dattani's guide to data visualization](https://www.scientificdiscovery.dev/p/salonis-guide-to-data-visualization). 
+
 Some tips that often help:
 
 - Remove axis titles when the title already says what is plotted, when their meaning is implied (years), or when they are hard to read (most y-axes)
 - Directly label a few important series instead of using a legend
 - Grey out background series when the figure focuses on few important series
-- Name a specific visualization guide when asking AI for plot suggestions, rather than asking for a "better plot" in general
-- Add annotations when they clarify the figure, although they are annoying to code in R
-
-There are better guides than this. I really like [Saloni Dattani's guide](https://www.scientificdiscovery.dev/p/salonis-guide-to-data-visualization). The [R Graph Gallery](https://r-graph-gallery.com/) is also a nice source for examples.
+- You can add annotations when they clarify things (although they are annoying to code in R)
+- Name a specific visualization guide when asking AI to generate plots. [Paul Goldsmith-Pinkham recommended using the following message in the prompt - ](https://youtu.be/Rp17XUPxa4I?si=g7hzproWhXlKNzri&t=1393) `Please follow the best practices of making figures from Kieran Healy.`
 
 The graph type should follow the question. This is a very partial list, but some examples:
 <table class="mini-table">
@@ -742,7 +743,7 @@ plot_df |>
 
 <div class="plot-break"></div>
 
-Notice that the axis titles are unnecessary ('gdp_pc' is implied from the title, 'year' is easily understood); and that it's extremely hard to understand which line refers to which country.
+The axis titles are unnecessary ('gdp_pc' is implied from the title, 'year' is easily understood), and that it's extremely hard to understand which line refers to which country.
 
 Suppose we want to focus on Ireland's rise from Sweden's level of GDP per capita to nearly Luxembourg's. We can highlight those countries and keep the other EU countries in grey, and remove the axis titles and legend:
 
@@ -822,7 +823,7 @@ plot_df |>
   coord_cartesian(clip = "off")
 ```
 
-# Spatial data basics
+# Spatial data
 
 There are two main types of spatial datasets:
 <table class="mini-table">
@@ -841,17 +842,17 @@ Pay attention to CRS and projections. A CRS tells R how coordinates on the scree
 
 | Tool | Examples | Main advantages | Main drawbacks |
 |---|---|---|---|
-| Programming languages | R, Python | Reproducible; easy to combine with cleaning and modeling | Storage, memory, and visual inspection |
-| GIS software | QGIS, ArcGIS | Visual inspection, manual exploration, cartography | Less convenient for scripted workflows |
+| Programming languages | R, Python | Easy to combine with cleaning and modeling, and with AI | Storage, memory, and visual inspection |
+| GIS software | QGIS, ArcGIS | Visual inspection, manual exploration | Less convenient for scripted workflows |
 | Google Earth Engine | Code Editor, Python API | Hosted catalogs and large raster summaries | Quotas and server-side debugging |
 
 Several notes on GIS software and GEE:
 
 - ArcGIS is powerful but not free
-- You can also program inside GIS tools, but I find that less convenient than `sf` in R
+- You can also program inside GIS tools, but I find that less convenient than `sf` and `terra` in R
 - GEE is best when the data already exists in the [Earth Engine data catalog](https://developers.google.com/earth-engine/datasets/) or the [GEE community catalog](https://gee-community-catalog.org/) - such as Hansen forest loss data or GHSL built-up - as you avoid downloading and storing large rasters
 - The coding experience in GEE is more annoying, but there's now a Gemini assistant there (which requires a Gemini API key, so is not unlimited).
-- GEE's new quotas are still usually enough for spatial aggregations, but more limited for heavier work such as geometric operations or raw image analysis
+- GEE's new quotas are still usually enough for spatial aggregations, but more limited for heavier work such as geometric operations
 - For GEE, using the Python API can keep the spatial step in the same project workflow, but it's harder to visually debug; you can start in the GEE code editor and let an AI convert it to Python when done (verify that outputs are identical)
 
 When unsure, AI can help consider the trade-offs. Since trying a small R version is now cheap, start there and check whether it is fast enough.
